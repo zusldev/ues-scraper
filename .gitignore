@@ -38,3 +38,5 @@ storage_state.json
 # OS
 .DS_Store
 Thumbs.db
+/ues_bot_modular.zip
+/ues_to_telegram.log
