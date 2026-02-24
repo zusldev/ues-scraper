@@ -103,6 +103,4 @@ python main.py --notify-unchanged
 ```
 
 ## Notes
-- The summary does NOT include links (designed for fast reading).
-- The batch of changes DOES include a link (assignment or event).
 - If the portal HTML changes, you may need to adjust selectors in `ues_bot/scrape.py`.
