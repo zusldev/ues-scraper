@@ -2,6 +2,8 @@
 
 **Author:** zusldev
 
+> **Disclaimer:** This project is for educational purposes only. Use at your own risk. The author is not responsible for any misuse, account bans, or legal issues arising from the usage of this script. Scraping may violate the terms of service of the target platform.
+
 ## Description
 
 Script that scrapes the UES Learning portal (ueslearning.ues.mx) and sends notifications to Telegram about new or changed assignments, events, and deadlines.
