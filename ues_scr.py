@@ -106,7 +106,11 @@ def assignment_is_submitted(assign_html: str) -> Tuple[Optional[bool], str]:
         if not th or not td:
             continue
         label = th.get_text(" ", strip=True).lower()
-        if "estatus de la entrega" in label or "estado de la entrega" in label or "submission status" in label:
+        if (
+            "estatus de la entrega" in label
+            or "estado de la entrega" in label
+            or "submission status" in label
+        ):
             value = td.get_text(" ", strip=True)
             v = value.lower()
             if any(p in v for p in SUBMITTED_PHRASES):
@@ -136,22 +140,40 @@ def parse_events_from_dashboard(html: str) -> List[Event]:
     """Parses dashboard HTML to extract event information."""
     soup = BeautifulSoup(html, "html.parser")
     events: List[Event] = []
+
     for ev in soup.select('div.event[data-region="event-item"]'):
         a_title = ev.select_one('h6 a[data-action="view-event"]')
         a_due = ev.select_one("div.date.small a")
+
         if not a_title:
             continue
+
         title = a_title.get_text(" ", strip=True)
-        url = (a_title.get("href") or "").strip()
+
+        url = a_title.get("href") or ""
+        if isinstance(url, list):
+            url = url[0] if url else ""
+        url = (url or "").strip()
+
         due_text = a_due.get_text(" ", strip=True) if a_due else ""
-        event_id = (a_title.get("data-event-id") or "").strip()
+
+        event_id = a_title.get("data-event-id") or ""
+        if isinstance(event_id, list):
+            event_id = event_id[0] if event_id else ""
+        event_id = (event_id or "").strip()
+
+        # fallback: try querystring
         if not event_id and url:
             m = re.search(r"[?&]event=(\d+)", url)
             if m:
                 event_id = m.group(1)
+
+        # last fallback: unique-ish key
         if not event_id:
             event_id = url or title
+
         events.append(Event(event_id=event_id, title=title, due_text=due_text, url=url))
+
     return events
 
 
@@ -173,10 +195,18 @@ def enrich_from_event_page(event_html: str) -> Tuple[str, str]:
 def find_assignment_url(event_html: str) -> str:
     """Finds the assignment link from event page HTML."""
     soup = BeautifulSoup(event_html, "html.parser")
+
     for a in soup.select("a[href]"):
         href = a.get("href", "")
+        if isinstance(href, list):
+            href = href[0] if href else ""
+        if not isinstance(href, str):
+            continue
+
+        href = href.strip()
         if f"{BASE}/mod/" in href and "view.php?id=" in href:
             return href
+
     return ""
 
 
@@ -211,7 +241,7 @@ def login_if_needed(page, context) -> None:
 # ------------ Minimal summary helpers ------------
 def parse_due_unix_from_event_url(url: str) -> Optional[int]:
     """Extracts due date as Unix timestamp from event URL."""
-    m = re.search(r"[?&]time=(\d+)", url)
+    m = re.search(r"[?&]time=(\d+)", url or "")
     return int(m.group(1)) if m else None
 
 
@@ -275,9 +305,7 @@ def build_quick_summary(events_all: List[Event], max_lines: int = 12) -> str:
 
     lines = ["📌 <b>Resumen rápido</b>"]
     for _, badge, title_s, course_s, remaining in rows[:max_lines]:
-        lines.append(
-            f"{badge} {esc(title_s)} — <i>{esc(course_s)}</i> — <b>quedan {esc(remaining)}</b>"
-        )
+        lines.append(f"{badge} {esc(title_s)} — <i>{esc(course_s)}</i> — <b>quedan {esc(remaining)}</b>")
 
     if len(rows) > max_lines:
         lines.append(f"… (+{len(rows) - max_lines} más)")
