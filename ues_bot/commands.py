@@ -311,6 +311,24 @@ async def cmd_intervalo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 @_restricted
+async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = context.application.bot_data["settings"]
+    text = (
+        "⚙️ <b>Configuración actual</b>\n"
+        f"• Timezone: <b>{esc(settings.tz_name)}</b>\n"
+        f"• Quiet hours: <b>{esc(settings.quiet_start)} - {esc(settings.quiet_end)}</b>\n"
+        f"• Intervalo scraping: <b>{settings.scrape_interval_min} min</b>\n"
+        f"• Urgencia: <b>{settings.urgent_hours}h</b>\n"
+        f"• Máx cambios: <b>{settings.max_change_items}</b>\n"
+        f"• Máx resumen: <b>{settings.max_summary_lines}</b>\n"
+        f"• Solo cambios: <b>{'Sí' if settings.only_changes else 'No'}</b>\n"
+        f"• Headful: <b>{'Sí' if settings.headful else 'No'}</b>\n"
+        f"• Dry-run: <b>{'Sí' if settings.dry_run else 'No'}</b>"
+    )
+    await _reply(update, text, parse_mode="HTML", disable_web_page_preview=True)
+
+
+@_restricted
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         "Comandos disponibles:\n"
@@ -323,6 +341,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/estado - Muestra estado operativo del bot.\n"
         "/silencio <HH:MM> <HH:MM> - Cambia quiet hours en caliente.\n"
         "/intervalo <minutos> - Cambia frecuencia del scraping automático.\n"
+        "/config - Muestra la configuración actual del bot.\n"
         "/help - Muestra esta ayuda."
     )
     await _reply(update, text)
@@ -338,4 +357,5 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("estado", cmd_estado))
     application.add_handler(CommandHandler("silencio", cmd_silencio))
     application.add_handler(CommandHandler("intervalo", cmd_intervalo))
+    application.add_handler(CommandHandler("config", cmd_config))
     application.add_handler(CommandHandler("help", cmd_help))
