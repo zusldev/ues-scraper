@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
-import time
 import logging
 from typing import List, Optional, Tuple
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import TimeoutError as PWTimeout
+from tenacity import Retrying, before_sleep_log, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .models import Event
 
@@ -153,14 +153,15 @@ def login_if_needed(page, context, dashboard_url: str, ues_user: str, ues_pass: 
 
 
 def safe_goto(page, url: str, tries: int = 3, wait_until: str = "domcontentloaded") -> None:
-    last_err: Optional[Exception] = None
-    for i in range(tries):
-        try:
-            page.goto(url, wait_until=wait_until, timeout=45000)
-            return
-        except Exception as e:
-            last_err = e
-            sleep_s = 1.2 * (2 ** i)
-            logging.warning("goto falló (%s). Reintento %d/%d en %.1fs: %s", url, i + 1, tries, sleep_s, e)
-            time.sleep(sleep_s)
-    raise RuntimeError(f"No se pudo navegar a {url}") from last_err
+    try:
+        for attempt in Retrying(
+            stop=stop_after_attempt(tries),
+            wait=wait_exponential(multiplier=1.2, min=1, max=10),
+            retry=retry_if_exception_type(Exception),
+            before_sleep=before_sleep_log(logging.getLogger(__name__), logging.WARNING),
+            reraise=True,
+        ):
+            with attempt:
+                page.goto(url, wait_until=wait_until, timeout=45000)
+    except Exception as exc:
+        raise RuntimeError(f"No se pudo navegar a {url}") from exc
