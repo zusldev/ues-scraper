@@ -329,6 +329,23 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 @_restricted
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = context.application.bot_data["settings"]
+    state = load_state(settings.state_file)
+    metrics = state.get("metrics", {})
+    text = (
+        "📊 <b>Estadísticas del bot</b>\n"
+        f"• Scrapes totales: <b>{metrics.get('total_scrapes', 0)}</b>\n"
+        f"• Exitosos: <b>{metrics.get('successful_scrapes', 0)}</b>\n"
+        f"• Fallidos: <b>{metrics.get('failed_scrapes', 0)}</b>\n"
+        f"• Último scrape: <b>{metrics.get('last_scrape_seconds', 0)}s</b>\n"
+        f"• Promedio: <b>{metrics.get('avg_scrape_seconds', 0)}s</b>\n"
+        f"• Eventos último ciclo: <b>{metrics.get('last_event_count', 0)}</b>"
+    )
+    await _reply(update, text, parse_mode="HTML", disable_web_page_preview=True)
+
+
+@_restricted
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         "Comandos disponibles:\n"
@@ -342,6 +359,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/silencio <HH:MM> <HH:MM> - Cambia quiet hours en caliente.\n"
         "/intervalo <minutos> - Cambia frecuencia del scraping automático.\n"
         "/config - Muestra la configuración actual del bot.\n"
+        "/stats - Muestra métricas de scraping del bot.\n"
         "/help - Muestra esta ayuda."
     )
     await _reply(update, text)
@@ -358,4 +376,5 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("silencio", cmd_silencio))
     application.add_handler(CommandHandler("intervalo", cmd_intervalo))
     application.add_handler(CommandHandler("config", cmd_config))
+    application.add_handler(CommandHandler("stats", cmd_stats))
     application.add_handler(CommandHandler("help", cmd_help))

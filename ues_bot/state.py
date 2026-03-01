@@ -17,6 +17,17 @@ def _with_defaults(state: Dict[str, Any]) -> Dict[str, Any]:
     state.setdefault("last_error", None)
     state.setdefault("consecutive_errors", 0)
     state.setdefault("sent_reminders", {})
+    state.setdefault(
+        "metrics",
+        {
+            "total_scrapes": 0,
+            "successful_scrapes": 0,
+            "failed_scrapes": 0,
+            "avg_scrape_seconds": 0.0,
+            "last_scrape_seconds": 0.0,
+            "last_event_count": 0,
+        },
+    )
     return state
 
 
@@ -70,3 +81,18 @@ def increment_error_count(state: Dict[str, Any]) -> int:
 
 def reset_error_count(state: Dict[str, Any]) -> None:
     state["consecutive_errors"] = 0
+
+
+def record_scrape_metrics(state: Dict[str, Any], duration_sec: float, event_count: int, success: bool) -> None:
+    metrics = state.setdefault("metrics", {})
+    metrics["total_scrapes"] = int(metrics.get("total_scrapes", 0)) + 1
+    metrics["last_event_count"] = int(event_count)
+    metrics["last_scrape_seconds"] = round(float(duration_sec), 2)
+
+    if success:
+        metrics["successful_scrapes"] = int(metrics.get("successful_scrapes", 0)) + 1
+        ok_count = metrics["successful_scrapes"]
+        prev_avg = float(metrics.get("avg_scrape_seconds", 0.0))
+        metrics["avg_scrape_seconds"] = round(((prev_avg * (ok_count - 1)) + float(duration_sec)) / ok_count, 2)
+    else:
+        metrics["failed_scrapes"] = int(metrics.get("failed_scrapes", 0)) + 1

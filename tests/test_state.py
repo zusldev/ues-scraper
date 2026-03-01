@@ -3,7 +3,15 @@ import time
 
 import pytest
 
-from ues_bot.state import cancel_sleep, is_sleeping, load_state, save_state, set_sleep, update_quiet_hours
+from ues_bot.state import (
+    cancel_sleep,
+    is_sleeping,
+    load_state,
+    record_scrape_metrics,
+    save_state,
+    set_sleep,
+    update_quiet_hours,
+)
 
 
 def test_load_state_creates_defaults(tmp_path):
@@ -57,3 +65,26 @@ def test_load_state_handles_corrupt_file(tmp_path):
         f.write("not json")
     with pytest.raises(json.JSONDecodeError):
         load_state(sf)
+
+
+def test_record_scrape_metrics_success(tmp_path):
+    sf = str(tmp_path / "state.json")
+    state = load_state(sf)
+    record_scrape_metrics(state, 15.5, 10, success=True)
+    metrics = state["metrics"]
+    assert metrics["total_scrapes"] == 1
+    assert metrics["successful_scrapes"] == 1
+    assert metrics["failed_scrapes"] == 0
+    assert metrics["last_scrape_seconds"] == 15.5
+    assert metrics["last_event_count"] == 10
+
+
+def test_record_scrape_metrics_failure(tmp_path):
+    sf = str(tmp_path / "state.json")
+    state = load_state(sf)
+    record_scrape_metrics(state, 4.0, 0, success=False)
+    metrics = state["metrics"]
+    assert metrics["total_scrapes"] == 1
+    assert metrics["successful_scrapes"] == 0
+    assert metrics["failed_scrapes"] == 1
+    assert metrics["last_event_count"] == 0

@@ -19,7 +19,7 @@ from .scrape import (
     parse_events_from_dashboard,
     safe_goto,
 )
-from .state import load_state, save_state
+from .state import load_state, record_scrape_metrics, save_state
 
 
 def run_scrape_cycle(
@@ -32,6 +32,7 @@ def run_scrape_cycle(
 
     state = load_state(settings.state_file)
     known = state.setdefault("events", {})
+    started_at = time.time()
 
     try:
         with sync_playwright() as p:
@@ -99,9 +100,11 @@ def run_scrape_cycle(
 
         state["last_run"] = int(time.time())
         state["last_error"] = None
+        record_scrape_metrics(state, duration_sec=time.time() - started_at, event_count=len(enriched_all), success=True)
         save_state(settings.state_file, state)
         return enriched_all, enriched_changed
     except Exception as ex:
         state["last_error"] = str(ex)
+        record_scrape_metrics(state, duration_sec=time.time() - started_at, event_count=0, success=False)
         save_state(settings.state_file, state)
         raise
