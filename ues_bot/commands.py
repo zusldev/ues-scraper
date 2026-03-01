@@ -25,7 +25,14 @@ from .state import (
     set_sleep,
     update_quiet_hours,
 )
-from .summary import build_sectioned_summary, due_unix, remaining_parts_from_unix, status_badge, urgency_bucket
+from .summary import (
+    build_sectioned_summary,
+    build_weekly_calendar,
+    due_unix,
+    remaining_parts_from_unix,
+    status_badge,
+    urgency_bucket,
+)
 from .telegram_client import tg_send
 from .utils import chunk_messages, esc, parse_hhmm, short
 
@@ -219,6 +226,21 @@ async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 @_restricted
+async def cmd_calendario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = context.application.bot_data["settings"]
+    await _reply(update, "Preparando calendario semanal...")
+    try:
+        events_all, _ = await run_scrape_now(context)
+    except Exception as ex:
+        await _reply(update, f"No se pudo ejecutar /calendario: {ex}")
+        return
+
+    calendar = build_weekly_calendar(events_all, tz_name=settings.tz_name)
+    for part in chunk_messages(calendar):
+        await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
+
+
+@_restricted
 async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
     state = load_state(settings.state_file)
@@ -297,6 +319,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/resumen - Fuerza scraping y envía resumen completo.\n"
         "/urgente - Fuerza scraping y muestra urgentes/vencidos no entregados.\n"
         "/pendientes - Fuerza scraping y muestra tareas con submitted=False.\n"
+        "/calendario - Fuerza scraping y muestra calendario semanal.\n"
         "/estado - Muestra estado operativo del bot.\n"
         "/silencio <HH:MM> <HH:MM> - Cambia quiet hours en caliente.\n"
         "/intervalo <minutos> - Cambia frecuencia del scraping automático.\n"
@@ -311,6 +334,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("resumen", cmd_resumen))
     application.add_handler(CommandHandler("urgente", cmd_urgente))
     application.add_handler(CommandHandler("pendientes", cmd_pendientes))
+    application.add_handler(CommandHandler("calendario", cmd_calendario))
     application.add_handler(CommandHandler("estado", cmd_estado))
     application.add_handler(CommandHandler("silencio", cmd_silencio))
     application.add_handler(CommandHandler("intervalo", cmd_intervalo))

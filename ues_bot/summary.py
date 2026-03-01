@@ -171,3 +171,46 @@ def build_changes_batch_message(changed: list[Event], max_items: int = 12) -> st
     if len(changed) > max_items:
         lines.append(f"\n… (+{len(changed) - max_items} más)")
     return "\n\n".join(lines).strip()
+
+
+def build_weekly_calendar(events_all: list[Event], tz_name: str) -> str:
+    from collections import defaultdict
+
+    if ZoneInfo is not None:
+        now = datetime.now(ZoneInfo(tz_name))
+    else:
+        now = datetime.now()
+
+    day_names = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"]
+    grouped: dict[str, list[str]] = defaultdict(list)
+
+    for event in events_all:
+        due = due_unix(event)
+        if due is None:
+            continue
+
+        if ZoneInfo is not None:
+            due_dt = datetime.fromtimestamp(due, tz=timezone.utc).astimezone(ZoneInfo(tz_name))
+        else:
+            due_dt = datetime.fromtimestamp(due)
+
+        day_diff = (due_dt.date() - now.date()).days
+        if day_diff < 0 or day_diff > 7:
+            continue
+
+        day_key = f"{day_names[due_dt.weekday()]} {due_dt.strftime('%Y-%m-%d')}"
+        _sec, rem_txt = remaining_parts_from_unix(due)
+        grouped[day_key].append(
+            f"{status_badge(event.submitted)} {esc(short(event.title, 50))}"
+            f" — <i>{esc(short(event.course_name, 30))}</i> — {esc(rem_txt)}"
+        )
+
+    if not grouped:
+        return "📅 <b>Calendario semanal</b>\n\nSin eventos en los próximos 7 días."
+
+    lines = ["📅 <b>Calendario semanal</b>"]
+    for day_key in sorted(grouped.keys()):
+        lines.append(f"\n<b>{esc(day_key)}</b>")
+        lines.extend(grouped[day_key])
+
+    return "\n".join(lines)
