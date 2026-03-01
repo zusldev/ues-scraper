@@ -1,0 +1,33 @@
+name: Release on Tag
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read changelog for this version
+        id: changelog
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/}
+          # Extract the section for this tag from the changelog (until next ## or EOF)
+          awk "/^## $TAG_VERSION /{flag=1;next}/^## /{flag=0}flag" CHANGELOG.md > RELEASE_BODY.txt
+          if [ ! -s RELEASE_BODY.txt ]; then
+            # fallback: output everything under first section
+            awk '/^## /{flag=1;next}/^## /{flag=0}flag' CHANGELOG.md > RELEASE_BODY.txt
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: RELEASE_BODY.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

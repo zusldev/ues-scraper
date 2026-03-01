@@ -1,172 +1,179 @@
-"""Entry point.
-# ues_to_telegram_playwright.py
-# Reqs:
-#   pip install playwright requests beautifulsoup4
-#   python -m playwright install
-#
-# Env vars:
-#   TG_BOT_TOKEN, TG_CHAT_ID
-#   UES_USER, UES_PASS
-#
-# Notes:
-# - Uses Playwright to login (username/password) and persist session in storage_state.json
-# - Scrapes Dashboard events, sends detailed messages for NEW/CHANGED events
-# - Sends a "Resumen rápido" at the end: status + activity + course + remaining time
-# - NOW -
-Run:
-  python main.py
-
-Options:
-  python main.py --headful
-  python main.py --dry-run
-  python main.py --quiet-start 22:00 --quiet-end 07:00
-  python main.py --urgent-hours 12
-"""
+"""Long-running Telegram bot for UES scraping + notifications."""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
-import os
 
-from playwright.sync_api import sync_playwright
-
-# Optional .env support (recommended)
 try:
     from dotenv import load_dotenv  # type: ignore
+
     load_dotenv()
 except Exception:
     pass
 
+from telegram.ext import Application, CallbackContext
+
+from ues_bot.commands import (
+    SCRAPE_JOB_CALLBACK_KEY,
+    SCRAPE_JOB_NAME,
+    SCRAPE_LOCK_KEY,
+    register_handlers,
+    run_scrape_now,
+)
 from ues_bot.config import from_env
 from ues_bot.logging_utils import setup_logging
-from ues_bot.state import load_state, save_state
-from ues_bot.scrape import (
-    login_if_needed,
-    safe_goto,
-    parse_events_from_dashboard,
-    enrich_from_event_page,
-    find_assignment_url,
-    assignment_is_submitted,
-)
+from ues_bot.state import is_sleeping, load_state, save_state
 from ues_bot.summary import build_changes_batch_message, build_sectioned_summary
 from ues_bot.telegram_client import tg_send
-from ues_bot.utils import now_local, is_in_quiet_hours, chunk_messages
+from ues_bot.utils import chunk_messages, is_in_quiet_hours, now_local
+
+
+async def periodic_scrape_job(context: CallbackContext) -> None:
+    """Periodic scrape job scheduled in the Telegram JobQueue."""
+    settings = context.application.bot_data["settings"]
+    state = load_state(settings.state_file)
+
+    sleep_until_before = state.get("sleep_until")
+    sleeping = is_sleeping(state)
+    just_woke = bool(sleep_until_before) and not sleeping
+
+    local_now = now_local(settings.tz_name)
+    quiet_now = is_in_quiet_hours(local_now, settings.quiet_start, settings.quiet_end)
+    save_state(settings.state_file, state)
+
+    try:
+        enriched_all, enriched_changed = await run_scrape_now(context, wait_for_lock_sec=0)
+    except Exception:
+        logging.exception("Error en scraping periódico.")
+        return
+
+    should_send_changes = bool(enriched_changed) or settings.notify_unchanged
+    if settings.only_changes and not enriched_changed:
+        should_send_changes = False
+
+    can_send_auto = not sleeping and not quiet_now
+    if not can_send_auto:
+        logging.info(
+            "Scraping ejecutado, sin notificación (sleeping=%s, quiet_now=%s).",
+            sleeping,
+            quiet_now,
+        )
+        return
+
+    if just_woke:
+        await tg_send(
+            "☀️ Bot activo de nuevo. Enviando resumen automático.",
+            settings.tg_bot_token,
+            settings.tg_chat_id,
+            dry_run=settings.dry_run,
+            bot=context.bot,
+        )
+
+    if should_send_changes:
+        msg = build_changes_batch_message(enriched_changed, max_items=settings.max_change_items)
+        for part in chunk_messages(msg):
+            await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
+
+    summary = build_sectioned_summary(
+        enriched_all,
+        tz_name=settings.tz_name,
+        urgent_hours=settings.urgent_hours,
+        max_lines_total=settings.max_summary_lines,
+    )
+    for part in chunk_messages(summary):
+        await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
 
 
 def main() -> None:
     settings = from_env()
 
-    parser = argparse.ArgumentParser(description="UES Learning -> Telegram (Playwright) modular")
+    parser = argparse.ArgumentParser(description="UES Learning -> Telegram long-running bot")
     parser.add_argument("--headful", action="store_true", help="Abrir navegador visible (no headless).")
     parser.add_argument("--verbose", action="store_true", help="Logs DEBUG.")
     parser.add_argument("--dry-run", action="store_true", help="No envía a Telegram, solo simula.")
-    parser.add_argument("--tz", default=settings.tz_name, help="Timezone IANA.")
-    parser.add_argument("--quiet-start", default=settings.quiet_start, help="Inicio quiet hours HH:MM (vacío desactiva).")
-    parser.add_argument("--quiet-end", default=settings.quiet_end, help="Fin quiet hours HH:MM (vacío desactiva).")
-    parser.add_argument("--urgent-hours", type=int, default=settings.urgent_hours, help="Horas para considerar urgente.")
+    parser.add_argument("--tz", default=None, help="Timezone IANA.")
+    parser.add_argument("--quiet-start", default=None, help="Inicio quiet hours HH:MM (vacío desactiva).")
+    parser.add_argument("--quiet-end", default=None, help="Fin quiet hours HH:MM (vacío desactiva).")
+    parser.add_argument("--urgent-hours", type=int, default=None, help="Horas para considerar urgente.")
     parser.add_argument("--only-changes", action="store_true", help="Solo notificar cambios (default).")
     parser.add_argument("--notify-unchanged", action="store_true", help="Notificar aunque no haya cambios.")
-    parser.add_argument("--max-change-items", type=int, default=settings.max_change_items, help="Máx items en cambios.")
-    parser.add_argument("--max-summary-lines", type=int, default=settings.max_summary_lines, help="Máx líneas resumen.")
+    parser.add_argument("--max-change-items", type=int, default=None, help="Máx items en cambios.")
+    parser.add_argument("--max-summary-lines", type=int, default=None, help="Máx líneas resumen.")
+    parser.add_argument("--scrape-interval-min", type=int, default=None, help="Intervalo de scraping automático.")
+    parser.add_argument(
+        "--scrape-lock-wait-sec",
+        type=int,
+        default=None,
+        help="Tiempo máximo para esperar lock de scraping en comandos bajo demanda.",
+    )
     args = parser.parse_args()
 
-    headful = args.headful
-    verbose = args.verbose
-    dry_run = args.dry_run
-    only_changes = True if args.only_changes else settings.only_changes
-    notify_unchanged = args.notify_unchanged or settings.notify_unchanged
+    settings.headful = args.headful
+    settings.verbose = args.verbose
+    settings.dry_run = args.dry_run
 
-    setup_logging(settings.log_file, verbose=verbose)
+    if args.tz:
+        settings.tz_name = args.tz
+    if args.urgent_hours is not None:
+        settings.urgent_hours = args.urgent_hours
+    if args.max_change_items is not None:
+        settings.max_change_items = args.max_change_items
+    if args.max_summary_lines is not None:
+        settings.max_summary_lines = args.max_summary_lines
+    if args.scrape_interval_min is not None:
+        settings.scrape_interval_min = args.scrape_interval_min
+    if args.scrape_lock_wait_sec is not None:
+        settings.scrape_lock_wait_sec = args.scrape_lock_wait_sec
+    if args.only_changes:
+        settings.only_changes = True
+    if args.notify_unchanged:
+        settings.notify_unchanged = True
 
-    local_now = now_local(args.tz)
-    quiet = is_in_quiet_hours(local_now, args.quiet_start, args.quiet_end)
-    if quiet:
-        logging.info("Quiet hours activas (%s-%s). No se enviarán mensajes.", args.quiet_start, args.quiet_end)
+    startup_state = load_state(settings.state_file)
+    if args.quiet_start is not None and args.quiet_end is not None:
+        settings.quiet_start = args.quiet_start
+        settings.quiet_end = args.quiet_end
+        startup_state["quiet_start"] = args.quiet_start
+        startup_state["quiet_end"] = args.quiet_end
+    else:
+        if startup_state.get("quiet_start"):
+            settings.quiet_start = startup_state["quiet_start"]
+        if startup_state.get("quiet_end"):
+            settings.quiet_end = startup_state["quiet_end"]
+    save_state(settings.state_file, startup_state)
 
-    state = load_state(settings.state_file)
-    known = state.setdefault("events", {})
+    setup_logging(settings.log_file, verbose=settings.verbose)
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not headful)
-        if settings.storage_file and os.path.exists(settings.storage_file):
-            context = browser.new_context(storage_state=settings.storage_file)
-        else:
-            context = browser.new_context()
+    if not settings.tg_bot_token or not settings.tg_chat_id:
+        raise RuntimeError("Falta TG_BOT_TOKEN o TG_CHAT_ID en variables de entorno.")
 
-        page = context.new_page()
+    app = Application.builder().token(settings.tg_bot_token).build()
+    app.bot_data["settings"] = settings
+    app.bot_data["run_scrape_args"] = {"headful": settings.headful}
+    app.bot_data[SCRAPE_JOB_CALLBACK_KEY] = periodic_scrape_job
+    app.bot_data[SCRAPE_LOCK_KEY] = asyncio.Lock()
 
-        login_if_needed(
-            page,
-            context,
-            dashboard_url=settings.dashboard_url,
-            ues_user=settings.ues_user,
-            ues_pass=settings.ues_pass,
-            storage_file=settings.storage_file,
-        )
+    register_handlers(app)
 
-        safe_goto(page, settings.dashboard_url)
-        dashboard_html = page.content()
-        events = parse_events_from_dashboard(dashboard_html)
-        logging.info("Eventos en dashboard: %d", len(events))
+    if app.job_queue is None:
+        raise RuntimeError("JobQueue no disponible. Instala python-telegram-bot[job-queue].")
+    app.job_queue.run_repeating(
+        periodic_scrape_job,
+        interval=settings.scrape_interval_min * 60,
+        first=0,
+        name=SCRAPE_JOB_NAME,
+    )
 
-        changed_basic = []
-        for e in events:
-            prev = known.get(e.event_id)
-            if prev is None or prev.get("due_text") != e.due_text or prev.get("title") != e.title:
-                changed_basic.append(e)
-            known[e.event_id] = {**(prev or {}), "title": e.title, "due_text": e.due_text, "url": e.url}
-
-        enriched_all = []
-        changed_ids = {c.event_id for c in changed_basic}
-
-        for e in events:
-            try:
-                safe_goto(page, e.url)
-            except Exception as ex:
-                logging.warning("No pude abrir evento %s: %s", e.url, ex)
-                enriched_all.append(e)
-                continue
-
-            event_html = page.content()
-            e.course_name, e.description = enrich_from_event_page(event_html)
-            e.assignment_url = find_assignment_url(event_html, base=settings.base)
-
-            if e.assignment_url:
-                try:
-                    safe_goto(page, e.assignment_url)
-                    assign_html = page.content()
-                    e.submitted, e.submission_status = assignment_is_submitted(assign_html)
-                except Exception as ex:
-                    logging.warning("No pude abrir assignment %s: %s", e.assignment_url, ex)
-
-            enriched_all.append(e)
-
-        enriched_changed = [e for e in enriched_all if e.event_id in changed_ids]
-
-        should_send_changes = bool(enriched_changed) or notify_unchanged
-        if only_changes and not enriched_changed:
-            should_send_changes = False
-
-        if not quiet and should_send_changes:
-            msg = build_changes_batch_message(enriched_changed, max_items=args.max_change_items)
-            for part in chunk_messages(msg):
-                tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=dry_run)
-
-        if not quiet:
-            summary = build_sectioned_summary(
-                enriched_all,
-                tz_name=args.tz,
-                urgent_hours=args.urgent_hours,
-                max_lines_total=args.max_summary_lines,
-            )
-            for part in chunk_messages(summary):
-                tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=dry_run)
-
-        save_state(settings.state_file, state)
-        browser.close()
-
-    logging.info("Listo.")
+    logging.info(
+        "Bot iniciado. Intervalo=%d min, quiet=%s-%s, tz=%s",
+        settings.scrape_interval_min,
+        settings.quiet_start,
+        settings.quiet_end,
+        settings.tz_name,
+    )
+    app.run_polling(drop_pending_updates=False)
 
 
 if __name__ == "__main__":

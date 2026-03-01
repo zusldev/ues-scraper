@@ -1,5 +1,7 @@
-import pytest
-from ues_scr import esc, status_badge, short, remaining_text_from_unix, parse_due_unix_from_event_url
+import time
+
+from ues_bot.summary import parse_due_unix_from_event_url, remaining_parts_from_unix, status_badge
+from ues_bot.utils import esc, short
 
 
 def test_esc_basic():
@@ -21,18 +23,18 @@ def test_short():
 
 
 def test_remaining_text_from_unix():
-    import time
-    # 5 minutos
     ts = int(time.time()) + 5 * 60
-    out = remaining_text_from_unix(ts)
+    _, out = remaining_parts_from_unix(ts)
     assert "m" in out
-    # vencido
+
     ts = int(time.time()) - 10
-    assert remaining_text_from_unix(ts) == "0m"
+    _, out = remaining_parts_from_unix(ts)
+    assert out == "0m"
 
 
 def test_parse_due_unix_from_event_url():
     url = "http://x.com/foo?time=12345"
     assert parse_due_unix_from_event_url(url) == 12345
+
     url = "?other=99"
     assert parse_due_unix_from_event_url(url) is None

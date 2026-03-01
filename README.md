@@ -8,13 +8,19 @@ This project monitors the **Dashboard** of UES Learning, detects **new/changed a
 
 - A **batch** with changes (to avoid spam).
 - A **summary** grouped by urgency: urgent, overdue, upcoming, submitted, etc.
+- Runs as a **long-lived Telegram bot** with interactive commands (`/resumen`, `/dormir`, `/estado`, etc.).
+
+## Changelog
+
+- Full release history: `CHANGELOG.md`
+- Latest release highlights: `v1.2.0` adds long-running interactive bot mode, command controls, and scraping concurrency hardening.
 
 ## Requirements
 
 - Python 3.9+ (recommended for `zoneinfo` support)
 - Playwright + browser:
   ```bash
-  pip install playwright requests beautifulsoup4 python-dotenv
+  pip install playwright beautifulsoup4 python-dotenv python-telegram-bot[job-queue]
   python -m playwright install
   ```
 
@@ -30,6 +36,7 @@ This project monitors the **Dashboard** of UES Learning, detects **new/changed a
 - `UES_TZ` — timezone (default: `America/Mazatlan`)
 - `UES_QUIET_START` — quiet hours start (default `00:00`)
 - `UES_QUIET_END` — quiet hours end (default `07:00`)
+- `UES_SCRAPE_INTERVAL_MIN` — periodic scrape interval in minutes (default `60`)
 - `UES_BASE` — base URL (default `https://ueslearning.ues.mx`)
 - `UES_DASHBOARD_URL` — dashboard URL (default `${UES_BASE}/my/`)
 - `UES_STATE_FILE` — state JSON file (default `seen_events.json`)
@@ -54,7 +61,7 @@ UES_QUIET_END=07:00
 
 ## Running
 
-### Normal mode (headless)
+### Start bot (polling, headless browser)
 ```bash
 python main.py
 ```
@@ -64,7 +71,7 @@ python main.py
 python main.py --headful
 ```
 
-### Test without Telegram messages (dry run)
+### Test without Telegram messages
 ```bash
 python main.py --dry-run
 ```
@@ -79,12 +86,23 @@ python main.py --quiet-start 22:00 --quiet-end 07:00
 python main.py --urgent-hours 12
 ```
 
-### Notification controls
-- By default, behaves as **only changes** (batch of changes + summary).
-- To force notifications even if there are no changes:
+### Notification controls (automatic job)
+- Default behavior: send changes + summary.
+- Force notifications even with no detected changes:
 ```bash
 python main.py --notify-unchanged
 ```
+
+### Telegram commands
+- `/dormir <horas>` silencia notificaciones automáticas por X horas (default 8)
+- `/despertar` cancela modo dormido
+- `/resumen` fuerza scraping + resumen completo
+- `/urgente` fuerza scraping + urgentes/vencidos no entregados
+- `/pendientes` fuerza scraping + submitted=False
+- `/estado` muestra estado operativo
+- `/silencio <HH:MM> <HH:MM>` cambia quiet hours en caliente
+- `/intervalo <minutos>` cambia frecuencia del job automático
+- `/help` muestra ayuda
 
 ## Project Structure
 
