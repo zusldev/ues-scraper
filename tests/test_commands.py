@@ -121,3 +121,18 @@ def test_run_scrape_now_fails_fast_when_scrape_in_progress():
             lock.release()
 
     asyncio.run(_run_test())
+
+
+def test_scrape_cooldown():
+    import ues_bot.commands as commands
+
+    commands._last_scrape_command_ts = 0.0
+    can_run, _wait = commands._check_cooldown()
+    assert can_run is True
+
+    commands._mark_scrape_used()
+    can_run, wait = commands._check_cooldown()
+    assert can_run is False
+    assert wait > 0
+
+    commands._last_scrape_command_ts = 0.0

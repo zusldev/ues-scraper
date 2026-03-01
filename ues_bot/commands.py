@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time
 from datetime import datetime
 from functools import wraps
 from typing import Any, Callable, Coroutine
@@ -39,6 +40,8 @@ from .utils import chunk_messages, esc, parse_hhmm, short
 SCRAPE_JOB_NAME = "scrape_cycle"
 SCRAPE_JOB_CALLBACK_KEY = "scrape_job_callback"
 SCRAPE_LOCK_KEY = "scrape_lock"
+SCRAPE_COMMAND_COOLDOWN = 60
+_last_scrape_command_ts = 0.0
 
 
 CommandFn = Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, None]]
@@ -142,6 +145,18 @@ def _build_brief_event_lines(events: list, max_lines: int = 20) -> str:
     return "\n".join(lines)
 
 
+def _check_cooldown() -> tuple[bool, int]:
+    elapsed = _time.time() - _last_scrape_command_ts
+    if elapsed < SCRAPE_COMMAND_COOLDOWN:
+        return False, int(SCRAPE_COMMAND_COOLDOWN - elapsed)
+    return True, 0
+
+
+def _mark_scrape_used() -> None:
+    global _last_scrape_command_ts
+    _last_scrape_command_ts = _time.time()
+
+
 @_restricted
 async def cmd_dormir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
@@ -173,6 +188,12 @@ async def cmd_despertar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 @_restricted
 async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
+    can_run, wait_sec = _check_cooldown()
+    if not can_run:
+        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+        return
+    _mark_scrape_used()
+
     await _reply(update, "Ejecutando scraping y preparando resumen...")
     try:
         events_all, _ = await run_scrape_now(context)
@@ -192,6 +213,12 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 @_restricted
 async def cmd_urgente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
+    can_run, wait_sec = _check_cooldown()
+    if not can_run:
+        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+        return
+    _mark_scrape_used()
+
     await _reply(update, "Buscando urgentes/vencidos no entregados...")
     try:
         events_all, _ = await run_scrape_now(context)
@@ -212,6 +239,12 @@ async def cmd_urgente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 @_restricted
 async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
+    can_run, wait_sec = _check_cooldown()
+    if not can_run:
+        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+        return
+    _mark_scrape_used()
+
     await _reply(update, "Buscando pendientes (submitted=False)...")
     try:
         events_all, _ = await run_scrape_now(context)
@@ -228,6 +261,12 @@ async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 @_restricted
 async def cmd_calendario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
+    can_run, wait_sec = _check_cooldown()
+    if not can_run:
+        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+        return
+    _mark_scrape_used()
+
     await _reply(update, "Preparando calendario semanal...")
     try:
         events_all, _ = await run_scrape_now(context)
