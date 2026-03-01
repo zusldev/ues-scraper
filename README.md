@@ -32,17 +32,6 @@ This project monitors the **Dashboard** of UES Learning, detects **new/changed a
 - `UES_USER` — portal username
 - `UES_PASS` — portal password
 
-### Optional (new features)
-- `UES_TZ` — timezone (default: `America/Mazatlan`)
-- `UES_QUIET_START` — quiet hours start (default `00:00`)
-- `UES_QUIET_END` — quiet hours end (default `07:00`)
-- `UES_SCRAPE_INTERVAL_MIN` — periodic scrape interval in minutes (default `60`)
-- `UES_BASE` — base URL (default `https://ueslearning.ues.mx`)
-- `UES_DASHBOARD_URL` — dashboard URL (default `${UES_BASE}/my/`)
-- `UES_STATE_FILE` — state JSON file (default `seen_events.json`)
-- `UES_STORAGE_FILE` — Playwright session file (default `storage_state.json`)
-- `UES_LOG_FILE` — log file (default `ues_to_telegram.log`)
-
 ## Use `.env` (recommended)
 
 Create a `.env` file in the same folder as `main.py`, for example:
