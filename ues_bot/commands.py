@@ -17,6 +17,7 @@ except Exception:  # pragma: no cover
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
+from .ical import build_ics_filename, build_iphone_calendar_ics
 from .scrape_job import run_scrape_cycle
 from .state import (
     cancel_sleep,
@@ -34,7 +35,7 @@ from .summary import (
     status_badge,
     urgency_bucket,
 )
-from .telegram_client import tg_send
+from .telegram_client import tg_send, tg_send_document
 from .utils import chunk_messages, esc, parse_hhmm, short
 
 SCRAPE_JOB_NAME = "scrape_cycle"
@@ -280,6 +281,44 @@ async def cmd_calendario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 @_restricted
+async def cmd_iphonecal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = context.application.bot_data["settings"]
+    can_run, wait_sec = _check_cooldown()
+    if not can_run:
+        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+        return
+    _mark_scrape_used()
+
+    await _reply(update, "Generando archivo .ics para iPhone Calendar...")
+    try:
+        events_all, _ = await run_scrape_now(context)
+    except Exception as ex:
+        await _reply(update, f"No se pudo ejecutar /iphonecal: {ex}")
+        return
+
+    ics_data, count = build_iphone_calendar_ics(events_all, tz_name=settings.tz_name, days_ahead=30)
+    if count == 0:
+        await _reply(update, "No hay pendientes con fecha en los próximos 30 días para exportar.")
+        return
+
+    filename = build_ics_filename(settings.tz_name)
+    caption = (
+        f"📎 <b>Calendario iPhone listo</b>\n"
+        f"Eventos exportados: <b>{count}</b>\n"
+        "Abre el archivo y elige <i>Agregar a Calendario</i>."
+    )
+    await tg_send_document(
+        ics_data,
+        filename,
+        settings.tg_bot_token,
+        settings.tg_chat_id,
+        caption=caption,
+        dry_run=settings.dry_run,
+        bot=context.bot,
+    )
+
+
+@_restricted
 async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
     state = load_state(settings.state_file)
@@ -394,6 +433,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/urgente - Fuerza scraping y muestra urgentes/vencidos no entregados.\n"
         "/pendientes - Fuerza scraping y muestra tareas con submitted=False.\n"
         "/calendario - Fuerza scraping y muestra calendario semanal.\n"
+        "/iphonecal - Exporta pendientes a archivo .ics para iPhone Calendar.\n"
         "/estado - Muestra estado operativo del bot.\n"
         "/silencio <HH:MM> <HH:MM> - Cambia quiet hours en caliente.\n"
         "/intervalo <minutos> - Cambia frecuencia del scraping automático.\n"
@@ -411,6 +451,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("urgente", cmd_urgente))
     application.add_handler(CommandHandler("pendientes", cmd_pendientes))
     application.add_handler(CommandHandler("calendario", cmd_calendario))
+    application.add_handler(CommandHandler("iphonecal", cmd_iphonecal))
     application.add_handler(CommandHandler("estado", cmd_estado))
     application.add_handler(CommandHandler("silencio", cmd_silencio))
     application.add_handler(CommandHandler("intervalo", cmd_intervalo))
