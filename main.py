@@ -106,6 +106,12 @@ async def periodic_scrape_job(context: CallbackContext) -> None:
         await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
 
 
+def persist_state_on_shutdown(state_file: str) -> None:
+    state = load_state(state_file)
+    save_state(state_file, state)
+    logging.info("Estado guardado. Bot detenido correctamente.")
+
+
 def main() -> None:
     settings = from_env()
 
@@ -193,7 +199,10 @@ def main() -> None:
         settings.quiet_end,
         settings.tz_name,
     )
-    app.run_polling(drop_pending_updates=False)
+    try:
+        app.run_polling(drop_pending_updates=False)
+    finally:
+        persist_state_on_shutdown(settings.state_file)
 
 
 if __name__ == "__main__":
