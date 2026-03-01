@@ -24,10 +24,10 @@ from ues_bot.commands import (
 )
 from ues_bot.config import from_env
 from ues_bot.logging_utils import setup_logging
-from ues_bot.state import is_sleeping, load_state, save_state
+from ues_bot.state import increment_error_count, is_sleeping, load_state, reset_error_count, save_state
 from ues_bot.summary import build_changes_batch_message, build_sectioned_summary
 from ues_bot.telegram_client import tg_send
-from ues_bot.utils import chunk_messages, is_in_quiet_hours, now_local
+from ues_bot.utils import chunk_messages, esc, is_in_quiet_hours, now_local
 
 
 async def periodic_scrape_job(context: CallbackContext) -> None:
@@ -45,8 +45,28 @@ async def periodic_scrape_job(context: CallbackContext) -> None:
 
     try:
         enriched_all, enriched_changed = await run_scrape_now(context, wait_for_lock_sec=0)
-    except Exception:
+        reset_error_count(state)
+        save_state(settings.state_file, state)
+    except Exception as ex:
         logging.exception("Error en scraping periódico.")
+        count = increment_error_count(state)
+        state["last_error"] = str(ex)
+        save_state(settings.state_file, state)
+        if count >= 3 and not sleeping and not quiet_now:
+            error_msg = (
+                f"⚠️ <b>Error en scraping automático</b> ({count} fallos consecutivos)\n"
+                f"<code>{esc(str(ex)[:200])}</code>"
+            )
+            try:
+                await tg_send(
+                    error_msg,
+                    settings.tg_bot_token,
+                    settings.tg_chat_id,
+                    dry_run=settings.dry_run,
+                    bot=context.bot,
+                )
+            except Exception:
+                logging.exception("No se pudo enviar alerta de error.")
         return
 
     should_send_changes = bool(enriched_changed) or settings.notify_unchanged

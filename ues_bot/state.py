@@ -15,6 +15,7 @@ def _with_defaults(state: Dict[str, Any]) -> Dict[str, Any]:
     state.setdefault("quiet_end", None)
     state.setdefault("last_run", None)
     state.setdefault("last_error", None)
+    state.setdefault("consecutive_errors", 0)
     return state
 
 
@@ -58,3 +59,13 @@ def cancel_sleep(state: Dict[str, Any]) -> None:
 def update_quiet_hours(state: Dict[str, Any], start: str, end: str) -> None:
     state["quiet_start"] = start
     state["quiet_end"] = end
+
+
+def increment_error_count(state: Dict[str, Any]) -> int:
+    count = int(state.get("consecutive_errors", 0)) + 1
+    state["consecutive_errors"] = count
+    return count
+
+
+def reset_error_count(state: Dict[str, Any]) -> None:
+    state["consecutive_errors"] = 0
