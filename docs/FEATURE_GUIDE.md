@@ -27,7 +27,31 @@ Ejemplo:
 /calendario
 ```
 
-## 3) Comando `/config`
+## 3) Comando `/iphonecal` (exportar a iPhone Calendar)
+
+- Fuerza un scraping inmediato.
+- Genera un archivo `.ics` con pendientes de los proximos 30 dias.
+- Excluye actividades marcadas como enviadas.
+- Envia el archivo por Telegram para importarlo en iPhone.
+
+Uso:
+
+```text
+/iphonecal
+```
+
+Como importarlo en iPhone:
+
+1. Abre el archivo `.ics` recibido en Telegram.
+2. Toca compartir/abrir con Calendario (o "Agregar a Calendario").
+3. Confirma el calendario destino.
+
+Resultado:
+
+- Cada entrega se agrega como evento de 30 minutos terminando en la hora limite.
+- Incluye materia, estado y link en la descripcion.
+
+## 4) Comando `/config`
 
 - Muestra configuracion activa en runtime.
 - Sirve para validar rapidamente timezone, quiet hours, intervalo, limites y flags.
@@ -38,7 +62,7 @@ Ejemplo:
 /config
 ```
 
-## 4) Comando `/stats`
+## 5) Comando `/stats`
 
 - Muestra metricas operativas de scraping:
   - scrapes totales
@@ -53,9 +77,9 @@ Ejemplo:
 /stats
 ```
 
-## 5) Cooldown en comandos de scraping
+## 6) Cooldown en comandos de scraping
 
-- Comandos afectados: `/resumen`, `/urgente`, `/pendientes`, `/calendario`.
+- Comandos afectados: `/resumen`, `/urgente`, `/pendientes`, `/calendario`, `/iphonecal`.
 - Cooldown global: 60s.
 - Si se dispara otro comando dentro del cooldown, el bot responde con segundos restantes.
 
@@ -63,31 +87,31 @@ Objetivo:
 
 - Evitar saturacion de portal, duplicidad de requests y spam de mensajes.
 
-## 6) Alertas por errores consecutivos
+## 7) Alertas por errores consecutivos
 
 - Si fallan 3 scrapes periodicos seguidos, el bot envia alerta al chat.
 - El contador se reinicia automaticamente en el siguiente scrape exitoso.
 - Se conserva en estado (`consecutive_errors`).
 
-## 7) Rotacion de logs
+## 8) Rotacion de logs
 
 - El log principal rota automaticamente para evitar crecimiento ilimitado.
 - Configuracion actual:
   - max size: 5 MB
   - backups: 3 archivos
 
-## 8) Retry automatico (`tenacity`)
+## 9) Retry automatico (`tenacity`)
 
 - Navegacion Playwright (`safe_goto`) con retries y backoff exponencial.
 - Envio Telegram (`tg_send`) con retries y backoff exponencial.
 - Reduce fallos transitorios por red inestable o latencia del portal.
 
-## 9) Shutdown con persistencia
+## 10) Shutdown con persistencia
 
 - Al apagar el proceso del bot, se persiste el estado.
 - Evita perdida de informacion de operacion (sleep, errores, recordatorios, metricas).
 
-## 10) Pruebas
+## 11) Pruebas
 
 La suite cubre:
 
@@ -101,6 +125,7 @@ La suite cubre:
 - errores
 - recordatorios
 - calendario
+- ical
 
 Ejecucion:
 

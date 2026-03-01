@@ -6,6 +6,22 @@
 
 Este proyecto monitorea el **Dashboard** de UES Learning, detecta actividades nuevas/cambiadas y envia notificaciones a Telegram en formato util para seguimiento academico.
 
+## Indice
+
+- [Estado actual del proyecto](#estado-actual-del-proyecto)
+- [Novedades implementadas](#novedades-implementadas)
+- [Changelog](#changelog)
+- [Requisitos](#requisitos)
+- [Dependencias y por que se usan](#dependencias-y-por-que-se-usan)
+- [Configuracion por variables de entorno](#configuracion-por-variables-de-entorno)
+- [Uso de `.env` (recomendado)](#uso-de-env-recomendado)
+- [Ejecucion](#ejecucion)
+- [Comandos Telegram](#comandos-telegram)
+- [Automatismos implementados](#automatismos-implementados)
+- [Estructura de proyecto](#estructura-de-proyecto)
+- [Limitaciones conocidas](#limitaciones-conocidas)
+- [Documentacion complementaria](#documentacion-complementaria)
+
 ## Estado actual del proyecto
 
 - Implementado: mejoras criticas y de funcionalidad de la fase activa (resiliencia, observabilidad, comandos nuevos, recordatorios).
@@ -130,6 +146,7 @@ python main.py --scrape-interval-min 30
 - `/urgente`: fuerza scraping + urgentes/vencidos no entregados.
 - `/pendientes`: fuerza scraping + tareas `submitted=False`.
 - `/calendario`: fuerza scraping + vista semanal agrupada por dia.
+- `/iphonecal`: exporta pendientes a archivo `.ics` para importarlo en iPhone Calendar.
 - `/estado`: muestra estado operativo (incluye ultimo error).
 - `/silencio <HH:MM> <HH:MM>`: cambia quiet hours en caliente.
 - `/intervalo <minutos>`: cambia frecuencia del job automatico.

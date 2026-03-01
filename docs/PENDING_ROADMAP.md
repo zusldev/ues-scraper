@@ -18,7 +18,7 @@ Este documento concentra lo que aun no se implementa y el plan recomendado para 
 ### Prioridad media
 
 4. Integracion de deteccion de calificaciones.
-5. Exportacion iCal para calendarios externos.
+5. Mejorar exportacion iCal (suscripcion por URL y filtros por materia).
 
 ### Prioridad baja / estrategica
 
@@ -112,11 +112,11 @@ Pasos sugeridos:
 
 ---
 
-## P4) Exportacion iCal
+## P4) iCal avanzado (mejora sobre lo ya implementado)
 
 Objetivo:
 
-- Permitir suscripcion de tareas en Google Calendar/Apple Calendar.
+- Extender la exportacion `.ics` actual para soporte de suscripcion y filtros.
 
 Archivos previstos:
 
@@ -125,9 +125,9 @@ Archivos previstos:
 
 Pasos sugeridos:
 
-1. Agregar dependencia `icalendar`.
-2. Generar `.ics` desde eventos futuros.
-3. Enviar archivo por Telegram en comando manual.
+1. Publicar feed `.ics` por URL para suscripcion continua.
+2. Agregar filtros por materia/estado.
+3. Mantener opcion manual actual via Telegram.
 
 ---
 

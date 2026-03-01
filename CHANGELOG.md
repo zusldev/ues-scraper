@@ -4,6 +4,7 @@
 
 ### Added
 - Comando `/calendario` para vista semanal agrupada por dia.
+- Comando `/iphonecal` para exportar pendientes a archivo `.ics` (iPhone Calendar).
 - Comando `/config` para mostrar configuracion activa del bot.
 - Comando `/stats` para metricas operativas de scraping.
 - Recordatorios escalonados de pendientes (`24h`, `6h`, `1h`).
