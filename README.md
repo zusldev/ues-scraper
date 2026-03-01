@@ -1,40 +1,83 @@
-# UES Learning → Telegram (Playwright) — Modular
+# UES Learning -> Telegram (Playwright) - Modular
 
 **Author:** zusldev
 
 > **Disclaimer:** This project is for educational purposes only. Use at your own risk. The author is not responsible for any misuse, account bans, or legal issues arising from the usage of this script. Scraping may violate the terms of service of the target platform.
 
-This project monitors the **Dashboard** of UES Learning, detects **new/changed activities**, and sends:
+Este proyecto monitorea el **Dashboard** de UES Learning, detecta actividades nuevas/cambiadas y envia notificaciones a Telegram en formato util para seguimiento academico.
 
-- A **batch** with changes (to avoid spam).
-- A **summary** grouped by urgency: urgent, overdue, upcoming, submitted, etc.
-- Runs as a **long-lived Telegram bot** with interactive commands (`/resumen`, `/dormir`, `/estado`, etc.).
+## Estado actual del proyecto
+
+- Implementado: mejoras criticas y de funcionalidad de la fase activa (resiliencia, observabilidad, comandos nuevos, recordatorios).
+- Pendiente: roadmap futuro documentado en `docs/PENDING_ROADMAP.md`.
+- Guia de uso completa: `docs/FEATURE_GUIDE.md`.
+
+## Novedades implementadas
+
+- Reintentos robustos con `tenacity` para navegacion de scraping y envio de mensajes Telegram.
+- Rotacion de logs en archivo con limite de tamano y backups.
+- Alerta automatica al chat cuando hay 3+ fallos consecutivos de scraping.
+- Guardado de estado en shutdown para minimizar perdida de estado operativo.
+- Recordatorios escalonados para pendientes (`24h`, `6h`, `1h`).
+- Comando nuevo `/calendario` para vista semanal.
+- Comando nuevo `/config` para inspeccionar configuracion activa.
+- Comando nuevo `/stats` para metricas operativas.
+- Rate limiting para comandos que disparan scraping manual (cooldown de 60s).
+- Suite de pruebas reorganizada y ampliada (`47` tests).
 
 ## Changelog
 
-- Full release history: `CHANGELOG.md`
-- Latest release highlights: `v1.2.0` adds long-running interactive bot mode, command controls, and scraping concurrency hardening.
+- Historial completo: `CHANGELOG.md`
+- Ultima base estable: `v1.2.0`
+- Cambios recientes locales: revisa la seccion `Unreleased` en `CHANGELOG.md`
 
-## Requirements
+## Requisitos
 
-- Python 3.9+ (recommended for `zoneinfo` support)
-- Playwright + browser:
+- Python 3.9+ (recomendado para `zoneinfo`)
+- Dependencias del proyecto:
   ```bash
-  pip install playwright beautifulsoup4 python-dotenv python-telegram-bot[job-queue]
+  pip install -r requirements.txt
   python -m playwright install
   ```
 
-## Configuration (Environment Variables)
+## Dependencias y por que se usan
 
-### Required
-- `TG_BOT_TOKEN` — your Telegram bot token
-- `TG_CHAT_ID` — destination chat id (your user or a group)
-- `UES_USER` — portal username
-- `UES_PASS` — portal password
+- `playwright`: automatiza navegador Chromium para login/navegacion real del portal.
+- `beautifulsoup4`: parseo de HTML para extraer eventos, estados y enlaces.
+- `python-dotenv`: carga variables de entorno desde `.env`.
+- `python-telegram-bot[job-queue]`: bot de larga ejecucion + scheduler interno periodico.
+- `tenacity`: politicas de retry con backoff para reducir fallas transitorias de red/portal.
 
-## Use `.env` (recommended)
+## Configuracion por variables de entorno
 
-Create a `.env` file in the same folder as `main.py`, for example:
+### Requeridas
+
+- `TG_BOT_TOKEN`: token del bot de Telegram.
+- `TG_CHAT_ID`: chat autorizado para comandos y destino de notificaciones.
+- `UES_USER`: usuario UES.
+- `UES_PASS`: password UES.
+
+### Opcionales
+
+- `UES_TZ`: timezone (default `America/Mazatlan`).
+- `UES_QUIET_START`: inicio de quiet hours (default `00:00`).
+- `UES_QUIET_END`: fin de quiet hours (default `07:00`).
+- `UES_SCRAPE_INTERVAL_MIN`: intervalo periodico en minutos (default `60`).
+- `UES_SCRAPE_LOCK_WAIT_SEC`: espera de lock para comandos on-demand (default `12`).
+- `UES_URGENT_HOURS`: umbral de urgencia en horas (default `24`).
+- `UES_MAX_CHANGE_ITEMS`: maximo de items por mensaje de cambios (default `12`).
+- `UES_MAX_SUMMARY_LINES`: maximo de lineas de resumen (default `18`).
+- `UES_BASE`: base URL del portal (default `https://ueslearning.ues.mx`).
+- `UES_DASHBOARD_URL`: dashboard URL (default `${UES_BASE}/my/`).
+- `UES_STATE_FILE`: archivo JSON de estado (default `seen_events.json`).
+- `UES_STORAGE_FILE`: archivo de sesion Playwright (default `storage_state.json`).
+- `UES_LOG_FILE`: archivo log (default `ues_to_telegram.log`).
+- `UES_ONLY_CHANGES`: notificar solo cambios (`true`/`false`, default `true`).
+- `UES_NOTIFY_UNCHANGED`: permitir notificar sin cambios (`true`/`false`, default `false`).
+
+## Uso de `.env` (recomendado)
+
+Crea un archivo `.env` junto a `main.py`:
 
 ```env
 TG_BOT_TOKEN=123456:ABCDEF...
@@ -42,72 +85,109 @@ TG_CHAT_ID=123456789
 UES_USER=your_username
 UES_PASS=your_password
 
-# Optional
+# Opcionales
 UES_TZ=America/Mazatlan
 UES_QUIET_START=00:00
 UES_QUIET_END=07:00
+UES_SCRAPE_INTERVAL_MIN=60
+UES_URGENT_HOURS=24
 ```
 
-## Running
+## Ejecucion
 
-### Start bot (polling, headless browser)
+### Inicio normal
+
 ```bash
 python main.py
 ```
 
-### Show browser (headful)
+### Headful (debug visual)
+
 ```bash
 python main.py --headful
 ```
 
-### Test without Telegram messages
+### Dry run (sin enviar Telegram)
+
 ```bash
 python main.py --dry-run
 ```
 
-### Change quiet hours
+### Ajustes por CLI
+
 ```bash
 python main.py --quiet-start 22:00 --quiet-end 07:00
-```
-
-### Change urgency threshold
-```bash
 python main.py --urgent-hours 12
-```
-
-### Notification controls (automatic job)
-- Default behavior: send changes + summary.
-- Force notifications even with no detected changes:
-```bash
 python main.py --notify-unchanged
+python main.py --scrape-interval-min 30
 ```
 
-### Telegram commands
-- `/dormir <horas>` silencia notificaciones automáticas por X horas (default 8)
-- `/despertar` cancela modo dormido
-- `/resumen` fuerza scraping + resumen completo
-- `/urgente` fuerza scraping + urgentes/vencidos no entregados
-- `/pendientes` fuerza scraping + submitted=False
-- `/estado` muestra estado operativo
-- `/silencio <HH:MM> <HH:MM>` cambia quiet hours en caliente
-- `/intervalo <minutos>` cambia frecuencia del job automático
-- `/help` muestra ayuda
+## Comandos Telegram
 
-## Project Structure
+- `/dormir <horas>`: silencia notificaciones automaticas por X horas (default 8).
+- `/despertar`: cancela modo dormido.
+- `/resumen`: fuerza scraping + resumen completo.
+- `/urgente`: fuerza scraping + urgentes/vencidos no entregados.
+- `/pendientes`: fuerza scraping + tareas `submitted=False`.
+- `/calendario`: fuerza scraping + vista semanal agrupada por dia.
+- `/estado`: muestra estado operativo (incluye ultimo error).
+- `/silencio <HH:MM> <HH:MM>`: cambia quiet hours en caliente.
+- `/intervalo <minutos>`: cambia frecuencia del job automatico.
+- `/config`: muestra configuracion activa cargada en runtime.
+- `/stats`: muestra metricas de scraping (totales, exitos/fallos, tiempos).
+- `/help`: ayuda de comandos.
 
-```
+> Nota: `/resumen`, `/urgente`, `/pendientes` y `/calendario` comparten cooldown de `60s` para evitar spam/carga excesiva.
+
+## Automatismos implementados
+
+- **Quiet hours:** pausa notificaciones automaticas por ventana horaria.
+- **Sleep mode:** pausa manual temporal con `/dormir`.
+- **Alertas de fallo:** notifica cuando se acumulan `3+` errores consecutivos de scraping.
+- **Recordatorios escalonados:** pendientes reciben avisos cercanos al vencimiento (`24h`, `6h`, `1h`).
+- **Resumen por secciones:** urgente, vencidos, proximos, enviados, sin fecha, futuro.
+
+## Estructura de proyecto
+
+```text
 .
-├── main.py
-└── ues_bot/
-   ├── config.py
-   ├── logging_utils.py
-   ├── models.py
-   ├── scrape.py
-   ├── state.py
-   ├── summary.py
-   ├── telegram_client.py
-   └── utils.py
+|- main.py
+|- requirements.txt
+|- pytest.ini
+|- tests/
+|  |- test_commands.py
+|  |- test_utils.py
+|  |- test_state.py
+|  |- test_summary.py
+|  |- test_scrape_parse.py
+|  |- test_logging.py
+|  |- test_retries.py
+|  |- test_error_handling.py
+|  |- test_reminders.py
+|  \- test_calendar.py
+|- docs/
+|  |- FEATURE_GUIDE.md
+|  \- PENDING_ROADMAP.md
+\- ues_bot/
+   |- commands.py
+   |- config.py
+   |- logging_utils.py
+   |- models.py
+   |- reminders.py
+   |- scrape.py
+   |- scrape_job.py
+   |- state.py
+   |- summary.py
+   |- telegram_client.py
+   \- utils.py
 ```
 
-## Notes
-- If the portal HTML changes, you may need to adjust selectors in `ues_bot/scrape.py`.
+## Limitaciones conocidas
+
+- Si cambia el HTML del portal, se deben ajustar selectores en `ues_bot/scrape.py`.
+- El estado actual usa JSON (no DB); roadmap para SQLite en `docs/PENDING_ROADMAP.md`.
+
+## Documentacion complementaria
+
+- Guia funcional de nuevas features: `docs/FEATURE_GUIDE.md`
+- Pendientes + plan de implementacion futuro: `docs/PENDING_ROADMAP.md`

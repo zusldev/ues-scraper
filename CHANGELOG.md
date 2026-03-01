@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Comando `/calendario` para vista semanal agrupada por dia.
+- Comando `/config` para mostrar configuracion activa del bot.
+- Comando `/stats` para metricas operativas de scraping.
+- Recordatorios escalonados de pendientes (`24h`, `6h`, `1h`).
+- Documentacion funcional ampliada en `docs/FEATURE_GUIDE.md`.
+- Roadmap pendiente y plan de implementacion en `docs/PENDING_ROADMAP.md`.
+
+### Changed
+- `safe_goto` y `tg_send` ahora usan retries con `tenacity`.
+- Logging migrado a `RotatingFileHandler` con rotacion de archivos.
+- Scraping periodico ahora alerta al chat en 3+ errores consecutivos.
+- Se agrego persistencia explicita de estado al cerrar el bot.
+- Se agrego rate limiting (cooldown 60s) para comandos que fuerzan scraping.
+
+### Testing
+- Suite reorganizada en `tests/` y expandida a 47 pruebas.
+
 ## v1.2.0 — Bot interactivo de larga ejecución + hardening
 
 ### Added
