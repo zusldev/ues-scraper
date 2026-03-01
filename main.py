@@ -24,8 +24,9 @@ from ues_bot.commands import (
 )
 from ues_bot.config import from_env
 from ues_bot.logging_utils import setup_logging
+from ues_bot.reminders import get_pending_reminders
 from ues_bot.state import increment_error_count, is_sleeping, load_state, reset_error_count, save_state
-from ues_bot.summary import build_changes_batch_message, build_sectioned_summary
+from ues_bot.summary import build_changes_batch_message, build_sectioned_summary, due_unix, remaining_parts_from_unix
 from ues_bot.telegram_client import tg_send
 from ues_bot.utils import chunk_messages, esc, is_in_quiet_hours, now_local
 
@@ -81,6 +82,35 @@ async def periodic_scrape_job(context: CallbackContext) -> None:
             quiet_now,
         )
         return
+
+    sent_reminders = state.setdefault("sent_reminders", {})
+    pending_reminders = get_pending_reminders(enriched_all, sent_reminders)
+    reminders_sent_now = False
+    for event, label in pending_reminders:
+        due = due_unix(event)
+        if due is None:
+            continue
+        _sec, rem_txt = remaining_parts_from_unix(due)
+        reminder_msg = (
+            f"⏰ <b>Recordatorio ({label})</b>\n"
+            f"• {esc(event.title)}\n"
+            f"• {esc(event.course_name)}\n"
+            f"• Tiempo restante: <b>{esc(rem_txt)}</b>"
+        )
+        await tg_send(
+            reminder_msg,
+            settings.tg_bot_token,
+            settings.tg_chat_id,
+            dry_run=settings.dry_run,
+            bot=context.bot,
+        )
+        sent_list = sent_reminders.setdefault(event.event_id, [])
+        if label not in sent_list:
+            sent_list.append(label)
+            reminders_sent_now = True
+
+    if reminders_sent_now:
+        save_state(settings.state_file, state)
 
     if just_woke:
         await tg_send(

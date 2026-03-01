@@ -16,6 +16,7 @@ def _with_defaults(state: Dict[str, Any]) -> Dict[str, Any]:
     state.setdefault("last_run", None)
     state.setdefault("last_error", None)
     state.setdefault("consecutive_errors", 0)
+    state.setdefault("sent_reminders", {})
     return state
 
 
