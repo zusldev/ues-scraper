@@ -25,12 +25,18 @@ from .state import (
     load_state,
     save_state,
     set_sleep,
+    update_digest_evening_hour,
+    update_notification_mode,
     update_quiet_hours,
 )
 from .summary import (
+    build_course_stats,
+    build_daily_digest,
+    build_evening_preview,
     build_sectioned_summary,
     build_weekly_calendar,
     due_unix,
+    grading_badge,
     remaining_parts_from_unix,
     status_badge,
     urgency_bucket,
@@ -256,13 +262,14 @@ async def cmd_urgente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 @_restricted
 async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
-    result = await _scrape_or_reply(update, context, "pendientes", "Buscando pendientes (submitted=False)...")
+    result = await _scrape_or_reply(update, context, "pendientes", "Buscando pendientes (sin enviar o por verificar)...")
     if result is None:
         return
     events_all, _ = result
-    pending_items = [event for event in events_all if event.submitted is False]
+    # Treat unknown status (None) as pending so users don't miss tasks when Moodle status detection fails.
+    pending_items = [event for event in events_all if event.submitted is not True]
     body = _build_brief_event_lines(pending_items, max_lines=settings.max_summary_lines)
-    text = f"📝 <b>Pendientes (sin enviar)</b>\n{body}"
+    text = f"📝 <b>Pendientes (sin enviar / por verificar)</b>\n{body}"
     for part in chunk_messages(text):
         await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
 
@@ -380,19 +387,128 @@ async def cmd_intervalo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 @_restricted
+async def cmd_notificar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Change notification mode: smart, silent, all."""
+    settings = context.application.bot_data["settings"]
+    args = context.args or []
+
+    if not args:
+        current = getattr(settings, "notification_mode", "smart")
+        modes_desc = {
+            "smart": "📱 <b>smart</b> — Solo cambios + recordatorios. Digests a sus horas.",
+            "silent": "🔇 <b>silent</b> — Solo recordatorios urgentes (≤1h). Digests a sus horas.",
+            "all": "📢 <b>all</b> — Resumen completo cada ciclo (puede ser ruidoso).",
+        }
+        lines = [
+            "🔔 <b>Modo de notificación</b>",
+            f"\nActual: <b>{esc(current)}</b>",
+            "\nModos disponibles:",
+        ]
+        for mode, desc in modes_desc.items():
+            marker = " ← actual" if mode == current else ""
+            lines.append(f"  {desc}{marker}")
+        lines.append("\nUso: /notificar smart|silent|all")
+        await _reply(update, "\n".join(lines), parse_mode="HTML")
+        return
+
+    mode = args[0].lower()
+    if mode not in ("smart", "silent", "all"):
+        await _reply(update, "Modo inválido. Usa: /notificar smart|silent|all")
+        return
+
+    settings.notification_mode = mode
+    state = load_state(settings.state_file)
+    update_notification_mode(state, mode)
+    save_state(settings.state_file, state)
+
+    descriptions = {
+        "smart": "📱 Modo <b>smart</b> activado.\n\nRecibirás:\n• Novedades cuando se detecten\n• Recordatorios a 24h, 6h, 1h\n• Digest matutino y vespertino",
+        "silent": "🔇 Modo <b>silent</b> activado.\n\nRecibirás:\n• Solo recordatorios urgentes (≤1h)\n• Digest matutino y vespertino",
+        "all": "📢 Modo <b>all</b> activado.\n\nRecibirás:\n• Resumen completo cada ciclo\n• Todos los recordatorios\n• Digest matutino y vespertino",
+    }
+    await _reply(update, descriptions[mode], parse_mode="HTML")
+
+
+@_restricted
+async def cmd_digestpm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Configure evening digest time, or disable it."""
+    settings = context.application.bot_data["settings"]
+    args = context.args or []
+
+    if not args:
+        current = getattr(settings, "digest_evening_hour", "") or "desactivado"
+        await _reply(
+            update,
+            f"🌙 Preview vespertino: <b>{esc(current)}</b>\n\n"
+            "Uso:\n"
+            "  /digestpm 20:00  — Activar a las 20:00\n"
+            "  /digestpm off    — Desactivar",
+            parse_mode="HTML",
+        )
+        return
+
+    value = args[0].strip().lower()
+    if value in ("off", "desactivar", "0", "no"):
+        settings.digest_evening_hour = ""
+        state = load_state(settings.state_file)
+        update_digest_evening_hour(state, "")
+        save_state(settings.state_file, state)
+        # Remove scheduled job
+        jq = context.application.job_queue
+        if jq:
+            for job in jq.get_jobs_by_name("evening_preview"):
+                job.schedule_removal()
+        await _reply(update, "🌙 Preview vespertino <b>desactivado</b>.", parse_mode="HTML")
+        return
+
+    try:
+        parse_hhmm(value)
+    except ValueError as ex:
+        await _reply(update, str(ex))
+        return
+
+    settings.digest_evening_hour = value
+    state = load_state(settings.state_file)
+    update_digest_evening_hour(state, value)
+    save_state(settings.state_file, state)
+
+    # Reschedule job
+    jq = context.application.job_queue
+    if jq:
+        for job in jq.get_jobs_by_name("evening_preview"):
+            job.schedule_removal()
+        from main import evening_preview_job, _schedule_daily_job
+        _schedule_daily_job(jq, evening_preview_job, value, settings.tz_name, "evening_preview")
+
+    await _reply(update, f"🌙 Preview vespertino actualizado a <b>{esc(value)}</b>.", parse_mode="HTML")
+
+
+_NOTIFICATION_MODE_LABELS = {"smart": "📱 smart", "silent": "🔇 silent", "all": "📢 all"}
+
+
+@_restricted
 async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
+    mode = getattr(settings, "notification_mode", "smart")
+    mode_label = _NOTIFICATION_MODE_LABELS.get(mode, mode)
+    evening = getattr(settings, "digest_evening_hour", "") or "off"
     text = (
-        "⚙️ <b>Configuración actual</b>\n"
-        f"• Timezone: <b>{esc(settings.tz_name)}</b>\n"
-        f"• Quiet hours: <b>{esc(settings.quiet_start)} - {esc(settings.quiet_end)}</b>\n"
-        f"• Intervalo scraping: <b>{settings.scrape_interval_min} min</b>\n"
-        f"• Urgencia: <b>{settings.urgent_hours}h</b>\n"
-        f"• Máx cambios: <b>{settings.max_change_items}</b>\n"
-        f"• Máx resumen: <b>{settings.max_summary_lines}</b>\n"
-        f"• Solo cambios: <b>{'Sí' if settings.only_changes else 'No'}</b>\n"
-        f"• Headful: <b>{'Sí' if settings.headful else 'No'}</b>\n"
-        f"• Dry-run: <b>{'Sí' if settings.dry_run else 'No'}</b>"
+        "⚙️ <b>Configuración actual</b>\n\n"
+        f"<b>🔔 Notificaciones</b>\n"
+        f"  Modo: <b>{esc(mode_label)}</b>\n"
+        f"  Digest matutino: <b>{esc(settings.digest_hour)}</b>\n"
+        f"  Preview vespertino: <b>{esc(evening)}</b>\n"
+        f"  Quiet hours: <b>{esc(settings.quiet_start)} - {esc(settings.quiet_end)}</b>\n\n"
+        f"<b>⚡ Scraping</b>\n"
+        f"  Intervalo: <b>{settings.scrape_interval_min} min</b>\n"
+        f"  Urgencia: <b>{settings.urgent_hours}h</b>\n\n"
+        f"<b>📋 Display</b>\n"
+        f"  Máx cambios: <b>{settings.max_change_items}</b>\n"
+        f"  Máx resumen: <b>{settings.max_summary_lines}</b>\n\n"
+        f"<b>🛠️ Sistema</b>\n"
+        f"  Timezone: <b>{esc(settings.tz_name)}</b>\n"
+        f"  Headful: <b>{'Sí' if settings.headful else 'No'}</b>\n"
+        f"  Dry-run: <b>{'Sí' if settings.dry_run else 'No'}</b>"
     )
     await _reply(update, text, parse_mode="HTML", disable_web_page_preview=True)
 
@@ -415,24 +531,227 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @_restricted
+async def cmd_proxima(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show the next upcoming unsubmitted deadline with full details."""
+    settings = context.application.bot_data["settings"]
+    result = await _scrape_or_reply(update, context, "proxima", "Buscando próxima entrega...")
+    if result is None:
+        return
+    events_all, _ = result
+
+    pending = [e for e in events_all if e.submitted is not True and due_unix(e) is not None]
+    pending.sort(key=lambda e: due_unix(e) or 10**18)
+
+    # Filter to only future events
+    from datetime import datetime as _dt, timezone as _tz
+    now_ts = int(_dt.now(_tz.utc).timestamp())
+    pending = [e for e in pending if (due_unix(e) or 0) > now_ts]
+
+    if not pending:
+        await tg_send(
+            "🎉 <b>¡Sin entregas pendientes!</b>\nNo tienes tareas próximas sin entregar.",
+            settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot,
+        )
+        return
+
+    e = pending[0]
+    du = due_unix(e)
+    _, rem = remaining_parts_from_unix(du) if du else (0, "N/D")
+    g_badge = grading_badge(e.grading_status)
+    link = e.assignment_url or e.url
+
+    text = (
+        f"⏰ <b>Próxima entrega</b>\n\n"
+        f"{status_badge(e.submitted)} <b>{esc(e.title)}</b>\n"
+        f"📚 {esc(e.course_name)}\n"
+        f"⏳ Tiempo restante: <b>{esc(rem)}</b>\n"
+        f"📅 {esc(e.due_text)}\n"
+    )
+    if e.grading_status:
+        text += f"📝 Calificación: {esc(e.grading_status)} {g_badge}\n"
+    if e.description:
+        text += f"\n📋 {esc(short(e.description, 300))}\n"
+    text += f"\n🔗 {esc(link)}"
+
+    for part in chunk_messages(text):
+        await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
+
+
+@_restricted
+async def cmd_materia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Filter events by course name. No args = list all courses."""
+    settings = context.application.bot_data["settings"]
+    result = await _scrape_or_reply(update, context, "materia", "Buscando eventos por materia...")
+    if result is None:
+        return
+    events_all, _ = result
+
+    query = " ".join(context.args).strip().lower() if context.args else ""
+
+    if not query:
+        # List all unique course names
+        courses = sorted({e.course_name for e in events_all if e.course_name and e.course_name != "Sin materia"})
+        if not courses:
+            await _reply(update, "No se detectaron materias.")
+            return
+        lines = ["📚 <b>Materias detectadas</b>\nUsa: /materia <nombre parcial>\n"]
+        for c in courses:
+            count = sum(1 for e in events_all if e.course_name == c)
+            submitted = sum(1 for e in events_all if e.course_name == c and e.submitted is True)
+            lines.append(f"• <b>{esc(c)}</b> ({submitted}✅/{count}📋)")
+        await _reply(update, "\n".join(lines), parse_mode="HTML")
+        return
+
+    matched = [e for e in events_all if query in (e.course_name or "").lower()]
+    if not matched:
+        await _reply(update, f"No encontré eventos para «{esc(query)}».")
+        return
+
+    body = _build_brief_event_lines(matched, max_lines=settings.max_summary_lines)
+    course_display = matched[0].course_name if len({e.course_name for e in matched}) == 1 else query
+    text = f"📚 <b>{esc(course_display)}</b> ({len(matched)} eventos)\n{body}"
+    for part in chunk_messages(text):
+        await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
+
+
+@_restricted
+async def cmd_detalle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show full details of a specific event by index or title search."""
+    settings = context.application.bot_data["settings"]
+
+    if not context.args:
+        await _reply(update, "Uso: /detalle <número o texto>\nEjemplo: /detalle 1 ó /detalle Resumen OSI")
+        return
+
+    result = await _scrape_or_reply(update, context, "detalle", "Buscando detalles del evento...")
+    if result is None:
+        return
+    events_all, _ = result
+
+    sorted_events = sorted(events_all, key=lambda e: due_unix(e) or 10**18)
+    # Store for index lookup
+    context.application.bot_data["_last_event_list"] = sorted_events
+
+    query = " ".join(context.args).strip()
+
+    # Try numeric index first
+    e = None
+    try:
+        idx = int(query)
+        if 1 <= idx <= len(sorted_events):
+            e = sorted_events[idx - 1]
+    except ValueError:
+        pass
+
+    # Fallback: text search
+    if e is None:
+        q_lower = query.lower()
+        for ev in sorted_events:
+            if q_lower in ev.title.lower() or q_lower in ev.course_name.lower():
+                e = ev
+                break
+
+    if e is None:
+        await _reply(update, f"No encontré evento «{esc(query)}». Usa /resumen para ver la lista numerada.")
+        return
+
+    du = due_unix(e)
+    _, rem = remaining_parts_from_unix(du) if du else (0, "N/D")
+    g_badge = grading_badge(e.grading_status)
+    link = e.assignment_url or e.url
+
+    text = (
+        f"🔍 <b>Detalle del evento</b>\n\n"
+        f"<b>{esc(e.title)}</b>\n\n"
+        f"📚 Materia: {esc(e.course_name)}\n"
+        f"📌 Estado: {status_badge(e.submitted)} {esc(e.submission_status or 'Desconocido')}\n"
+        f"⏳ Restante: <b>{esc(rem)}</b>\n"
+        f"📅 Fecha: {esc(e.due_text)}\n"
+    )
+    if e.grading_status:
+        text += f"📝 Calificación: {esc(e.grading_status)} {g_badge}\n"
+    if e.description:
+        text += f"\n📋 <b>Descripción:</b>\n{esc(short(e.description, 500))}\n"
+    text += f"\n🔗 {esc(link)}"
+
+    for part in chunk_messages(text):
+        await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
+
+
+@_restricted
+async def cmd_materiastats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show per-course statistics."""
+    settings = context.application.bot_data["settings"]
+    result = await _scrape_or_reply(update, context, "materiastats", "Calculando estadísticas por materia...")
+    if result is None:
+        return
+    events_all, _ = result
+    text = build_course_stats(events_all)
+    for part in chunk_messages(text):
+        await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
+
+
+@_restricted
+async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show daily digest: overdue, due today, due tomorrow."""
+    settings = context.application.bot_data["settings"]
+    result = await _scrape_or_reply(update, context, "digest", "Preparando resumen del día...")
+    if result is None:
+        return
+    events_all, _ = result
+    text = build_daily_digest(events_all, tz_name=settings.tz_name, urgent_hours=settings.urgent_hours)
+    for part in chunk_messages(text):
+        await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
+
+
+@_restricted
+async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show evening preview: what's due tomorrow."""
+    settings = context.application.bot_data["settings"]
+    result = await _scrape_or_reply(update, context, "preview", "Preparando preview nocturno...")
+    if result is None:
+        return
+    events_all, _ = result
+    text = build_evening_preview(events_all, tz_name=settings.tz_name)
+    for part in chunk_messages(text):
+        await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
+
+
+@_restricted
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
-        "Comandos disponibles:\n"
-        "/dormir <horas> - Silencia notificaciones automáticas por X horas (default 8).\n"
-        "/despertar - Cancela el modo dormido.\n"
-        "/resumen - Fuerza scraping y envía resumen completo.\n"
-        "/urgente - Fuerza scraping y muestra urgentes/vencidos no entregados.\n"
-        "/pendientes - Fuerza scraping y muestra tareas con submitted=False.\n"
-        "/calendario - Fuerza scraping y muestra calendario semanal.\n"
-        "/iphonecal - Exporta pendientes a archivo .ics para iPhone Calendar.\n"
-        "/estado - Muestra estado operativo del bot.\n"
-        "/silencio <HH:MM> <HH:MM> - Cambia quiet hours en caliente.\n"
-        "/intervalo <minutos> - Cambia frecuencia del scraping automático.\n"
-        "/config - Muestra la configuración actual del bot.\n"
-        "/stats - Muestra métricas de scraping del bot.\n"
-        "/help - Muestra esta ayuda."
+        "📖 <b>Comandos disponibles</b>\n\n"
+
+        "<b>📋 Consultas</b>\n"
+        "/resumen — Resumen completo por urgencia\n"
+        "/digest — Resumen del día (vencidas, hoy, mañana)\n"
+        "/preview — Preview nocturno (¿qué hay mañana?)\n"
+        "/proxima — Próxima entrega pendiente\n"
+        "/urgente — Urgentes y vencidos no entregados\n"
+        "/pendientes — Todas las tareas sin enviar\n"
+        "/materia [nombre] — Filtrar por materia\n"
+        "/detalle &lt;n|texto&gt; — Detalles de un evento\n"
+        "/calendario — Vista semanal\n"
+        "/materiastats — Estadísticas por materia\n\n"
+
+        "<b>📤 Exportar</b>\n"
+        "/iphonecal — Exportar .ics para iPhone Calendar\n\n"
+
+        "<b>🔔 Notificaciones</b>\n"
+        "/notificar [smart|silent|all] — Modo de notificación\n"
+        "/digestpm [HH:MM|off] — Hora del preview vespertino\n"
+        "/dormir [horas] — Silencia por X horas (default 8)\n"
+        "/despertar — Cancela modo dormido\n"
+        "/silencio HH:MM HH:MM — Quiet hours\n\n"
+
+        "<b>⚙️ Configuración</b>\n"
+        "/intervalo &lt;min&gt; — Frecuencia de scraping\n"
+        "/config — Ver configuración actual\n"
+        "/estado — Estado operativo del bot\n"
+        "/stats — Métricas de scraping\n"
+        "/help — Esta ayuda"
     )
-    await _reply(update, text)
+    await _reply(update, text, parse_mode="HTML")
 
 
 def register_handlers(application: Application) -> None:
@@ -441,8 +760,16 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("resumen", cmd_resumen))
     application.add_handler(CommandHandler("urgente", cmd_urgente))
     application.add_handler(CommandHandler("pendientes", cmd_pendientes))
+    application.add_handler(CommandHandler("proxima", cmd_proxima))
+    application.add_handler(CommandHandler("materia", cmd_materia))
+    application.add_handler(CommandHandler("detalle", cmd_detalle))
+    application.add_handler(CommandHandler("digest", cmd_digest))
+    application.add_handler(CommandHandler("preview", cmd_preview))
     application.add_handler(CommandHandler("calendario", cmd_calendario))
     application.add_handler(CommandHandler("iphonecal", cmd_iphonecal))
+    application.add_handler(CommandHandler("materiastats", cmd_materiastats))
+    application.add_handler(CommandHandler("notificar", cmd_notificar))
+    application.add_handler(CommandHandler("digestpm", cmd_digestpm))
     application.add_handler(CommandHandler("estado", cmd_estado))
     application.add_handler(CommandHandler("silencio", cmd_silencio))
     application.add_handler(CommandHandler("intervalo", cmd_intervalo))
