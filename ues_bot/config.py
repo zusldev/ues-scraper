@@ -46,6 +46,9 @@ class Settings:
     dry_run: bool = False
     only_changes: bool = True
     notify_unchanged: bool = False
+    digest_hour: str = "07:00"
+    digest_evening_hour: str = "20:00"  # empty string = disabled
+    notification_mode: str = "smart"  # "smart" | "silent" | "all"
 
 
 def from_env() -> Settings:
@@ -72,4 +75,7 @@ def from_env() -> Settings:
         max_summary_lines=int(os.getenv("UES_MAX_SUMMARY_LINES", "18")),
         only_changes=os.getenv("UES_ONLY_CHANGES", "true").lower() in {"1", "true", "yes", "on"},
         notify_unchanged=os.getenv("UES_NOTIFY_UNCHANGED", "false").lower() in {"1", "true", "yes", "on"},
+        digest_hour=os.getenv("UES_DIGEST_HOUR", "07:00"),
+        digest_evening_hour=os.getenv("UES_DIGEST_EVENING_HOUR", "20:00"),
+        notification_mode=os.getenv("UES_NOTIFICATION_MODE", "smart"),
     )

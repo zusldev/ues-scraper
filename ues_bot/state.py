@@ -17,6 +17,8 @@ def _with_defaults(state: Dict[str, Any]) -> Dict[str, Any]:
     state.setdefault("last_error", None)
     state.setdefault("consecutive_errors", 0)
     state.setdefault("sent_reminders", {})
+    state.setdefault("notification_mode", None)  # None = use settings default
+    state.setdefault("digest_evening_hour", None)
     state.setdefault(
         "metrics",
         {
@@ -71,6 +73,14 @@ def cancel_sleep(state: Dict[str, Any]) -> None:
 def update_quiet_hours(state: Dict[str, Any], start: str, end: str) -> None:
     state["quiet_start"] = start
     state["quiet_end"] = end
+
+
+def update_notification_mode(state: Dict[str, Any], mode: str) -> None:
+    state["notification_mode"] = mode
+
+
+def update_digest_evening_hour(state: Dict[str, Any], hour: str) -> None:
+    state["digest_evening_hour"] = hour
 
 
 def increment_error_count(state: Dict[str, Any]) -> int:
