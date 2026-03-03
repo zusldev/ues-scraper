@@ -10,6 +10,8 @@ from ues_bot.state import (
     record_scrape_metrics,
     save_state,
     set_sleep,
+    update_digest_evening_hour,
+    update_notification_mode,
     update_quiet_hours,
 )
 
@@ -88,3 +90,22 @@ def test_record_scrape_metrics_failure(tmp_path):
     assert metrics["successful_scrapes"] == 0
     assert metrics["failed_scrapes"] == 1
     assert metrics["last_event_count"] == 0
+
+
+def test_update_notification_mode(tmp_path):
+    sf = str(tmp_path / "state.json")
+    state = load_state(sf)
+    assert state["notification_mode"] is None
+    update_notification_mode(state, "silent")
+    save_state(sf, state)
+    loaded = load_state(sf)
+    assert loaded["notification_mode"] == "silent"
+
+
+def test_update_digest_evening_hour(tmp_path):
+    sf = str(tmp_path / "state.json")
+    state = load_state(sf)
+    update_digest_evening_hour(state, "21:00")
+    save_state(sf, state)
+    loaded = load_state(sf)
+    assert loaded["digest_evening_hour"] == "21:00"

@@ -34,6 +34,21 @@ def test_build_iphone_calendar_ics_includes_pending_events():
     assert "Tarea Enviada" not in text
 
 
+def test_build_iphone_calendar_ics_includes_valarm():
+    """Each event should have 3 VALARM reminders (24h, 6h, 1h)."""
+    events = [_make_event("1", "Tarea con Alarmas", due_offset_sec=3600, submitted=False)]
+    data, count = build_iphone_calendar_ics(events, tz_name="UTC", days_ahead=30)
+    text = data.decode("utf-8")
+
+    assert count == 1
+    assert text.count("BEGIN:VALARM") == 3
+    assert text.count("END:VALARM") == 3
+    assert "TRIGGER:-PT24H" in text
+    assert "TRIGGER:-PT6H" in text
+    assert "TRIGGER:-PT1H" in text
+    assert "ACTION:DISPLAY" in text
+
+
 def test_build_iphone_calendar_ics_empty_when_no_valid_events():
     events = [_make_event("3", "Vencida", due_offset_sec=-100, submitted=False)]
     data, count = build_iphone_calendar_ics(events, tz_name="UTC", days_ahead=30)
