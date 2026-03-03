@@ -35,16 +35,16 @@ Este proyecto monitorea el **Dashboard** de UES Learning, detecta actividades nu
 - Alerta automatica al chat cuando hay 3+ fallos consecutivos de scraping.
 - Guardado de estado en shutdown para minimizar perdida de estado operativo.
 - Recordatorios escalonados para pendientes (`24h`, `6h`, `1h`).
-- Comando nuevo `/calendario` para vista semanal.
-- Comando nuevo `/config` para inspeccionar configuracion activa.
-- Comando nuevo `/stats` para metricas operativas.
-- Rate limiting para comandos que disparan scraping manual (cooldown de 60s).
-- Suite de pruebas reorganizada y ampliada (`47` tests).
+- Sistema de notificaciones por modo: `smart` (default), `silent`, `all`.
+- Digest matutino automatico + preview vespertino automatico (20:00).
+- Comandos nuevos: `/notificar`, `/digestpm`, `/preview`, `/proxima`, `/materia`, `/detalle`, `/materiastats`.
+- Exportacion iCal con alarmas `VALARM` (24h/6h/1h).
+- Suite de pruebas reorganizada y ampliada (`87` tests).
 
 ## Changelog
 
 - Historial completo: `CHANGELOG.md`
-- Ultima base estable: `v1.2.0`
+- Ultima base estable: `v1.3.0`
 - Cambios recientes locales: revisa la seccion `Unreleased` en `CHANGELOG.md`
 
 ## Requisitos
@@ -83,13 +83,14 @@ Este proyecto monitorea el **Dashboard** de UES Learning, detecta actividades nu
 - `UES_URGENT_HOURS`: umbral de urgencia en horas (default `24`).
 - `UES_MAX_CHANGE_ITEMS`: maximo de items por mensaje de cambios (default `12`).
 - `UES_MAX_SUMMARY_LINES`: maximo de lineas de resumen (default `18`).
+- `UES_DIGEST_HOUR`: hora del digest matutino (default `07:00`).
+- `UES_DIGEST_EVENING_HOUR`: hora del preview vespertino (default `20:00`, vacio desactiva).
+- `UES_NOTIFICATION_MODE`: `smart`, `silent` o `all` (default `smart`).
 - `UES_BASE`: base URL del portal (default `https://ueslearning.ues.mx`).
 - `UES_DASHBOARD_URL`: dashboard URL (default `${UES_BASE}/my/`).
 - `UES_STATE_FILE`: archivo JSON de estado (default `seen_events.json`).
 - `UES_STORAGE_FILE`: archivo de sesion Playwright (default `storage_state.json`).
 - `UES_LOG_FILE`: archivo log (default `ues_to_telegram.log`).
-- `UES_ONLY_CHANGES`: notificar solo cambios (`true`/`false`, default `true`).
-- `UES_NOTIFY_UNCHANGED`: permitir notificar sin cambios (`true`/`false`, default `false`).
 
 ## Uso de `.env` (recomendado)
 
@@ -134,18 +135,27 @@ python main.py --dry-run
 ```bash
 python main.py --quiet-start 22:00 --quiet-end 07:00
 python main.py --urgent-hours 12
-python main.py --notify-unchanged
 python main.py --scrape-interval-min 30
+python main.py --notification-mode smart
+python main.py --digest-hour 07:00 --digest-evening 20:00
 ```
 
 ## Comandos Telegram
 
 - `/dormir <horas>`: silencia notificaciones automaticas por X horas (default 8).
 - `/despertar`: cancela modo dormido.
+- `/notificar [smart|silent|all]`: cambia modo de notificacion.
+- `/digestpm [HH:MM|off]`: cambia hora del preview vespertino o lo desactiva.
 - `/resumen`: fuerza scraping + resumen completo.
-- `/urgente`: fuerza scraping + urgentes/vencidos no entregados.
-- `/pendientes`: fuerza scraping + tareas `submitted=False`.
-- `/calendario`: fuerza scraping + vista semanal agrupada por dia.
+- `/digest`: resumen del dia (vencidas, hoy, manana).
+- `/preview`: preview nocturno (entregas de manana).
+- `/proxima`: proxima entrega pendiente.
+- `/urgente`: urgentes/vencidos no entregados.
+- `/pendientes`: tareas sin enviar / por verificar.
+- `/materia [nombre]`: filtra por materia.
+- `/detalle <n|texto>`: detalle completo de evento.
+- `/materiastats`: estadisticas por materia.
+- `/calendario`: vista semanal agrupada por dia.
 - `/iphonecal`: exporta pendientes a archivo `.ics` para importarlo en iPhone Calendar.
 - `/estado`: muestra estado operativo (incluye ultimo error).
 - `/silencio <HH:MM> <HH:MM>`: cambia quiet hours en caliente.
@@ -154,7 +164,7 @@ python main.py --scrape-interval-min 30
 - `/stats`: muestra metricas de scraping (totales, exitos/fallos, tiempos).
 - `/help`: ayuda de comandos.
 
-> Nota: `/resumen`, `/urgente`, `/pendientes` y `/calendario` comparten cooldown de `60s` para evitar spam/carga excesiva.
+> Nota: comandos que fuerzan scraping comparten cooldown de `60s` para evitar spam/carga excesiva.
 
 ## Automatismos implementados
 
@@ -162,6 +172,8 @@ python main.py --scrape-interval-min 30
 - **Sleep mode:** pausa manual temporal con `/dormir`.
 - **Alertas de fallo:** notifica cuando se acumulan `3+` errores consecutivos de scraping.
 - **Recordatorios escalonados:** pendientes reciben avisos cercanos al vencimiento (`24h`, `6h`, `1h`).
+- **Digest matutino:** resumen amigable diario (default 07:00).
+- **Preview vespertino:** tareas de manana (default 20:00).
 - **Resumen por secciones:** urgente, vencidos, proximos, enviados, sin fecha, futuro.
 
 ## Estructura de proyecto

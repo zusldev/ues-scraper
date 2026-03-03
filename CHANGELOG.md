@@ -3,62 +3,56 @@
 ## Unreleased
 
 ### Added
-- Comando `/calendario` para vista semanal agrupada por dia.
-- Comando `/iphonecal` para exportar pendientes a archivo `.ics` (iPhone Calendar).
-- Comando `/config` para mostrar configuracion activa del bot.
-- Comando `/stats` para metricas operativas de scraping.
-- Recordatorios escalonados de pendientes (`24h`, `6h`, `1h`).
-- Documentacion funcional ampliada en `docs/FEATURE_GUIDE.md`.
-- Roadmap pendiente y plan de implementacion en `docs/PENDING_ROADMAP.md`.
+- **Sistema de notificaciones inteligente** con 3 modos: `smart` (default), `silent`, `all`.
+- **Digest matutino automático** a las 07:00 con saludo, barra de progreso y tips.
+- **Preview vespertino automático** a las 20:00: muestra entregas de mañana.
+- Comando `/notificar [smart|silent|all]` para cambiar modo de notificación en caliente.
+- Comando `/digestpm [HH:MM|off]` para configurar hora del preview vespertino.
+- Comando `/preview` para preview nocturno bajo demanda.
+- Comando `/proxima` para ver la próxima entrega pendiente con detalles completos.
+- Comando `/materia [nombre]` para filtrar eventos por materia (sin args lista todas).
+- Comando `/detalle <n|texto>` para mostrar todos los campos de un evento.
+- Comando `/digest` para resumen del día (vencidas, hoy, mañana).
+- Comando `/materiastats` para estadísticas por materia (enviadas, pendientes, vencidas).
+- Detección de calificaciones: extrae "Estatus de calificación" de cada assignment.
+- Campo `grading_status` en modelo `Event` y `grading_badge()` en summary.
+- Alarmas VALARM (24h, 6h, 1h) en exportación `.ics` para notificaciones iPhone.
+- Parser `parse_grading_status()` en scrape.py.
+- Funciones `build_daily_digest()`, `build_evening_preview()`, `build_course_stats()` en summary.
+- Barra de progreso `_progress_bar()` en mensajes digest.
+- Saludos aleatorios y tips en digest matutino/vespertino.
+- Persistencia de `notification_mode` y `digest_evening_hour` en state.json.
+- Variables de entorno: `UES_DIGEST_HOUR`, `UES_DIGEST_EVENING_HOUR`, `UES_NOTIFICATION_MODE`.
+- CLI args: `--digest-evening`, `--notification-mode`.
+- Tests: 87 pruebas (+9 nuevas para evening preview, progress bar, state persistence).
 
 ### Changed
-- `safe_goto` y `tg_send` ahora usan retries con `tenacity`.
-- Logging migrado a `RotatingFileHandler` con rotacion de archivos.
-- Scraping periodico ahora alerta al chat en 3+ errores consecutivos.
-- Se agrego persistencia explicita de estado al cerrar el bot.
-- Se agrego rate limiting (cooldown 60s) para comandos que fuerzan scraping.
+- **Scrape periódico ya NO envía resumen completo cada hora** (modo `smart` por default).
+- En modo `smart`: solo envía mensajes cuando hay cambios reales o recordatorios.
+- En modo `silent`: solo envía recordatorios urgentes (≤1h).
+- En modo `all`: comportamiento legacy (resumen completo cada ciclo).
+- Al despertar del modo dormido, ahora envía un digest completo en lugar de solo "Bot activo".
+- Mensaje de cambios mejorado: "📬 Novedad detectada" (singular) / "📬 Novedades detectadas" (plural).
+- Recordatorios ahora incluyen link directo al assignment.
+- `/config` reorganizado con secciones: Notificaciones, Scraping, Display, Sistema.
+- `/help` reorganizado con categorías: Consultas, Exportar, Notificaciones, Configuración.
+- `status_badge(False)` ahora retorna 📝 (pendiente) y `status_badge(None)` retorna ⚠️ (verificación).
+- Parser de estado de entrega endurecido con normalización de texto y fallback global para evitar falsos `None`.
 
 ### Testing
-- Suite reorganizada en `tests/` y expandida a 47 pruebas.
+- Suite reorganizada en `tests/` y expandida a 87 pruebas.
 
-## v1.2.0 — Bot interactivo de larga ejecución + hardening
-
-### Added
-- Bot de Telegram de larga ejecución con `python-telegram-bot` + `JobQueue` (`application.run_polling`).
-- Comandos interactivos restringidos por `TG_CHAT_ID`: `/dormir`, `/despertar`, `/resumen`, `/urgente`, `/pendientes`, `/estado`, `/silencio`, `/intervalo`, `/help`.
-- `run_scrape_cycle(settings, args_override)` en `ues_bot/scrape_job.py` para reutilizar scraping desde job periódico y comandos bajo demanda.
-- Estado persistente ampliado: `sleep_until`, `quiet_start`, `quiet_end`, `last_run`, `last_error`.
-- Soporte de intervalo en caliente con `scrape_interval_min` y comando `/intervalo`.
-- Soporte de lock de scraping para evitar ejecuciones simultáneas (`scrape_lock_wait_sec`).
-- Nuevas pruebas para handlers y control de concurrencia (`test_commands.py`).
-
-### Changed
-- `tg_send` ahora puede usar `Bot` de `python-telegram-bot` y mantiene compatibilidad con `dry_run`.
-- `main.py` migrado de ejecución única tipo cron a proceso persistente con programación interna cada N minutos.
-- `requirements.txt` actualizado para incluir `python-telegram-bot[job-queue]`.
-
-### Notes
-- Para producción, usar Task Scheduler solo para iniciar el proceso al arrancar sesión/sistema (no cada hora).
-
-## 1.1.0 — Modular + Usabilidad (batch + quiet hours + resumen por secciones)
+## v1.3.0 — Notificaciones inteligentes + UX digest + scraping robusto
 
 ### Added
-- **Quiet hours**: no envía mensajes entre `UES_QUIET_START` y `UES_QUIET_END` (por defecto 00:00–07:00).
-- **Batch de cambios**: agrupa eventos nuevos/cambiados en un solo bloque (y se parte automáticamente si excede límite de Telegram).
-- **Resumen por secciones**: agrupa por urgencia:
-  - 🔥 Urgente (≤N horas)
-  - 🕒 Vencidos (no enviados)
-  - 📅 Próximos (≤7 días)
-  - ✅ Enviados
-  - ⌛ Sin fecha detectada
-  - 🗓️ Futuro
-- **Soporte .env** con `python-dotenv`.
-- **Logs** a consola y archivo `ues_to_telegram.log`.
-- **Retries de navegación** para páginas lentas/caídas (`safe_goto`).
+- Modos de notificación `smart/silent/all`.
+- Digest matutino automático y preview vespertino automático (20:00 default).
+- Comandos `/notificar`, `/digestpm`, `/preview`.
+- Heurísticas robustas de estado de entrega para Moodle real (acentos/encoding).
 
 ### Changed
-- Código separado en módulos (mejor mantenibilidad).
+- Scrape periódico en modo `smart` ya no spamea resumen completo cada hora.
+- `/pendientes` ahora incluye tareas sin enviar **y** tareas por verificar (`submitted is not True`).
 
 ### Notes
-- `--dry-run` simula envíos (ideal para depurar).
-- Si tu Python es <3.9, `zoneinfo` puede no estar disponible (se usa hora local del sistema).
+- Release generado desde la rama `master` con cobertura completa de tests.
