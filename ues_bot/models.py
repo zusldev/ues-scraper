@@ -17,3 +17,4 @@ class Event:
     assignment_url: str = ""
     submitted: Optional[bool] = None
     submission_status: str = ""
+    grading_status: str = ""

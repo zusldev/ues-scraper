@@ -17,6 +17,7 @@ from .scrape import (
     find_assignment_url,
     login_if_needed,
     parse_events_from_dashboard,
+    parse_grading_status,
     safe_goto,
 )
 from .state import load_state, record_scrape_metrics, save_state
@@ -54,6 +55,16 @@ def run_scrape_cycle(
                 )
 
                 safe_goto(page, settings.dashboard_url)
+
+                # Give the JS-rendered timeline block time to populate.
+                try:
+                    page.wait_for_selector(
+                        '[data-region="event-list-item"], [data-region="event-item"]',
+                        timeout=8000,
+                    )
+                except Exception:
+                    logging.debug("Timeout esperando event items; parseando lo disponible.")
+
                 dashboard_html = page.content()
                 events = parse_events_from_dashboard(dashboard_html)
                 logging.info("Eventos en dashboard: %d", len(events))
@@ -73,22 +84,36 @@ def run_scrape_cycle(
                 enriched_all: list[Event] = []
                 changed_ids = {event.event_id for event in changed_basic}
                 for event in events:
-                    try:
-                        safe_goto(page, event.url)
-                    except Exception as ex:
-                        logging.warning("No pude abrir evento %s: %s", event.url, ex)
-                        enriched_all.append(event)
-                        continue
+                    # If timeline already gave us course + assignment URL
+                    # we can skip the expensive event-page navigation.
+                    needs_event_page = (
+                        event.course_name in ("", "Sin materia")
+                        or not event.assignment_url
+                    )
 
-                    event_html = page.content()
-                    event.course_name, event.description = enrich_from_event_page(event_html)
-                    event.assignment_url = find_assignment_url(event_html, base=settings.base)
+                    if needs_event_page and event.url:
+                        try:
+                            safe_goto(page, event.url)
+                        except Exception as ex:
+                            logging.warning("No pude abrir evento %s: %s", event.url, ex)
+                            enriched_all.append(event)
+                            continue
+
+                        event_html = page.content()
+                        course, desc = enrich_from_event_page(event_html)
+                        if event.course_name in ("", "Sin materia"):
+                            event.course_name = course
+                        if not event.description:
+                            event.description = desc
+                        if not event.assignment_url:
+                            event.assignment_url = find_assignment_url(event_html, base=settings.base)
 
                     if event.assignment_url:
                         try:
                             safe_goto(page, event.assignment_url)
                             assign_html = page.content()
                             event.submitted, event.submission_status = assignment_is_submitted(assign_html)
+                            event.grading_status = parse_grading_status(assign_html)
                         except Exception as ex:
                             logging.warning("No pude abrir assignment %s: %s", event.assignment_url, ex)
 
