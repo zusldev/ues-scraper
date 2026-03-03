@@ -38,6 +38,12 @@ def test_assignment_is_submitted_not_submitted():
     assert submitted is False
 
 
+def test_assignment_is_submitted_not_submitted_plain_text():
+    html = '<table class="generaltable"><tr><th>Submission status</th><td>Not submitted</td></tr></table>'
+    submitted, _status = assignment_is_submitted(html)
+    assert submitted is False
+
+
 def test_assignment_is_submitted_unknown():
     html = "<html><body>Nothing here</body></html>"
     submitted, status = assignment_is_submitted(html)

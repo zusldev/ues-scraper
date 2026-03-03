@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-from ues_bot.commands import SCRAPE_LOCK_KEY, cmd_dormir, cmd_help, cmd_intervalo, run_scrape_now
+from ues_bot.commands import LAST_SCRAPE_TS_KEY, SCRAPE_LOCK_KEY, cmd_dormir, cmd_help, cmd_intervalo, run_scrape_now
 from ues_bot.config import Settings
 from ues_bot.state import load_state
 
@@ -40,6 +40,7 @@ class _FakeApp:
             "run_scrape_args": {},
             "scrape_job_callback": lambda _ctx: None,
             SCRAPE_LOCK_KEY: asyncio.Lock(),
+            LAST_SCRAPE_TS_KEY: 0.0,
         }
         self.job_queue = _FakeJobQueue()
 
@@ -144,15 +145,15 @@ def test_run_scrape_now_wait_zero_runs_when_lock_is_free(monkeypatch):
 
 
 def test_scrape_cooldown():
-    import ues_bot.commands as commands
+    from ues_bot.commands import _check_cooldown, _mark_scrape_used
 
-    commands._last_scrape_command_ts = 0.0
-    can_run, _wait = commands._check_cooldown()
+    bot_data = {LAST_SCRAPE_TS_KEY: 0.0}
+
+    can_run, _wait = _check_cooldown(bot_data)
     assert can_run is True
 
-    commands._mark_scrape_used()
-    can_run, wait = commands._check_cooldown()
+    _mark_scrape_used(bot_data)
+    can_run, wait = _check_cooldown(bot_data)
     assert can_run is False
     assert wait > 0
 
-    commands._last_scrape_command_ts = 0.0

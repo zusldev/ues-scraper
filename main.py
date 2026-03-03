@@ -13,9 +13,11 @@ try:
 except Exception:
     pass
 
+from telegram import Update
 from telegram.ext import Application, CallbackContext
 
 from ues_bot.commands import (
+    LAST_SCRAPE_TS_KEY,
     SCRAPE_JOB_CALLBACK_KEY,
     SCRAPE_JOB_NAME,
     SCRAPE_LOCK_KEY,
@@ -30,6 +32,36 @@ from ues_bot.state import increment_error_count, is_sleeping, load_state, reset_
 from ues_bot.summary import build_changes_batch_message, build_sectioned_summary, due_unix, remaining_parts_from_unix
 from ues_bot.telegram_client import tg_send
 from ues_bot.utils import chunk_messages, esc, is_in_quiet_hours, now_local
+
+
+async def global_error_handler(update: object, context: CallbackContext) -> None:
+    """Log unhandled exceptions and notify via Telegram (respects quiet hours / sleep)."""
+    logging.exception("Excepción no manejada en handler:", exc_info=context.error)
+
+    settings = context.application.bot_data.get("settings")
+    if settings is None:
+        return
+
+    state = load_state(settings.state_file)
+    sleeping = is_sleeping(state)
+    local_now = now_local(settings.tz_name)
+    quiet_now = is_in_quiet_hours(local_now, settings.quiet_start, settings.quiet_end)
+
+    if sleeping or quiet_now:
+        return
+
+    error_text = str(context.error)[:200] if context.error else "Error desconocido"
+    msg = f"❌ <b>Error inesperado</b>\n<code>{esc(error_text)}</code>"
+    try:
+        await tg_send(
+            msg,
+            settings.tg_bot_token,
+            settings.tg_chat_id,
+            dry_run=settings.dry_run,
+            bot=context.bot,
+        )
+    except Exception:
+        logging.exception("No se pudo enviar alerta de error inesperado.")
 
 
 async def periodic_scrape_job(context: CallbackContext) -> None:
@@ -214,8 +246,10 @@ def main() -> None:
     app.bot_data["run_scrape_args"] = {"headful": settings.headful}
     app.bot_data[SCRAPE_JOB_CALLBACK_KEY] = periodic_scrape_job
     app.bot_data[SCRAPE_LOCK_KEY] = asyncio.Lock()
+    app.bot_data[LAST_SCRAPE_TS_KEY] = 0.0
 
     register_handlers(app)
+    app.add_error_handler(global_error_handler)
 
     if app.job_queue is None:
         raise RuntimeError("JobQueue no disponible. Instala python-telegram-bot[job-queue].")

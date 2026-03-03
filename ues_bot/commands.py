@@ -42,7 +42,7 @@ SCRAPE_JOB_NAME = "scrape_cycle"
 SCRAPE_JOB_CALLBACK_KEY = "scrape_job_callback"
 SCRAPE_LOCK_KEY = "scrape_lock"
 SCRAPE_COMMAND_COOLDOWN = 60
-_last_scrape_command_ts = 0.0
+LAST_SCRAPE_TS_KEY = "last_scrape_command_ts"
 
 
 CommandFn = Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, None]]
@@ -153,16 +153,41 @@ def _build_brief_event_lines(events: list, max_lines: int = 20) -> str:
     return "\n".join(lines)
 
 
-def _check_cooldown() -> tuple[bool, int]:
-    elapsed = _time.time() - _last_scrape_command_ts
+def _check_cooldown(bot_data: dict) -> tuple[bool, int]:
+    elapsed = _time.time() - bot_data.get(LAST_SCRAPE_TS_KEY, 0.0)
     if elapsed < SCRAPE_COMMAND_COOLDOWN:
         return False, int(SCRAPE_COMMAND_COOLDOWN - elapsed)
     return True, 0
 
 
-def _mark_scrape_used() -> None:
-    global _last_scrape_command_ts
-    _last_scrape_command_ts = _time.time()
+def _mark_scrape_used(bot_data: dict) -> None:
+    bot_data[LAST_SCRAPE_TS_KEY] = _time.time()
+
+
+async def _scrape_or_reply(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    cmd_name: str,
+    status_msg: str = "Ejecutando scraping...",
+) -> tuple[list, list] | None:
+    """Shared cooldown + scrape logic for on-demand commands.
+
+    Returns (events_all, events_changed) or None if it failed
+    (error already replied to the user).
+    """
+    bot_data = context.application.bot_data
+    can_run, wait_sec = _check_cooldown(bot_data)
+    if not can_run:
+        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+        return None
+    _mark_scrape_used(bot_data)
+
+    await _reply(update, status_msg)
+    try:
+        return await run_scrape_now(context)
+    except Exception as ex:
+        await _reply(update, f"No se pudo ejecutar /{cmd_name}: {ex}")
+        return None
 
 
 @_restricted
@@ -196,18 +221,10 @@ async def cmd_despertar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 @_restricted
 async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
-    can_run, wait_sec = _check_cooldown()
-    if not can_run:
-        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+    result = await _scrape_or_reply(update, context, "resumen", "Ejecutando scraping y preparando resumen...")
+    if result is None:
         return
-    _mark_scrape_used()
-
-    await _reply(update, "Ejecutando scraping y preparando resumen...")
-    try:
-        events_all, _ = await run_scrape_now(context)
-    except Exception as ex:
-        await _reply(update, f"No se pudo ejecutar /resumen: {ex}")
-        return
+    events_all, _ = result
     summary = build_sectioned_summary(
         events_all,
         tz_name=settings.tz_name,
@@ -221,18 +238,10 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 @_restricted
 async def cmd_urgente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
-    can_run, wait_sec = _check_cooldown()
-    if not can_run:
-        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+    result = await _scrape_or_reply(update, context, "urgente", "Buscando urgentes/vencidos no entregados...")
+    if result is None:
         return
-    _mark_scrape_used()
-
-    await _reply(update, "Buscando urgentes/vencidos no entregados...")
-    try:
-        events_all, _ = await run_scrape_now(context)
-    except Exception as ex:
-        await _reply(update, f"No se pudo ejecutar /urgente: {ex}")
-        return
+    events_all, _ = result
     urgent_items = [
         event
         for event in events_all
@@ -247,18 +256,10 @@ async def cmd_urgente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 @_restricted
 async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
-    can_run, wait_sec = _check_cooldown()
-    if not can_run:
-        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+    result = await _scrape_or_reply(update, context, "pendientes", "Buscando pendientes (submitted=False)...")
+    if result is None:
         return
-    _mark_scrape_used()
-
-    await _reply(update, "Buscando pendientes (submitted=False)...")
-    try:
-        events_all, _ = await run_scrape_now(context)
-    except Exception as ex:
-        await _reply(update, f"No se pudo ejecutar /pendientes: {ex}")
-        return
+    events_all, _ = result
     pending_items = [event for event in events_all if event.submitted is False]
     body = _build_brief_event_lines(pending_items, max_lines=settings.max_summary_lines)
     text = f"📝 <b>Pendientes (sin enviar)</b>\n{body}"
@@ -269,19 +270,10 @@ async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 @_restricted
 async def cmd_calendario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
-    can_run, wait_sec = _check_cooldown()
-    if not can_run:
-        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+    result = await _scrape_or_reply(update, context, "calendario", "Preparando calendario semanal...")
+    if result is None:
         return
-    _mark_scrape_used()
-
-    await _reply(update, "Preparando calendario semanal...")
-    try:
-        events_all, _ = await run_scrape_now(context)
-    except Exception as ex:
-        await _reply(update, f"No se pudo ejecutar /calendario: {ex}")
-        return
-
+    events_all, _ = result
     calendar = build_weekly_calendar(events_all, tz_name=settings.tz_name)
     for part in chunk_messages(calendar):
         await tg_send(part, settings.tg_bot_token, settings.tg_chat_id, dry_run=settings.dry_run, bot=context.bot)
@@ -290,18 +282,10 @@ async def cmd_calendario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 @_restricted
 async def cmd_iphonecal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = context.application.bot_data["settings"]
-    can_run, wait_sec = _check_cooldown()
-    if not can_run:
-        await _reply(update, f"⏳ Espera {wait_sec}s antes de ejecutar otro scrape.")
+    result = await _scrape_or_reply(update, context, "iphonecal", "Generando archivo .ics para iPhone Calendar...")
+    if result is None:
         return
-    _mark_scrape_used()
-
-    await _reply(update, "Generando archivo .ics para iPhone Calendar...")
-    try:
-        events_all, _ = await run_scrape_now(context)
-    except Exception as ex:
-        await _reply(update, f"No se pudo ejecutar /iphonecal: {ex}")
-        return
+    events_all, _ = result
 
     ics_data, count = build_iphone_calendar_ics(events_all, tz_name=settings.tz_name, days_ahead=30)
     if count == 0:
