@@ -19,6 +19,7 @@ from ues_bot.commands import (
     SCRAPE_JOB_CALLBACK_KEY,
     SCRAPE_JOB_NAME,
     SCRAPE_LOCK_KEY,
+    ScrapeAlreadyRunningError,
     register_handlers,
     run_scrape_now,
 )
@@ -48,6 +49,9 @@ async def periodic_scrape_job(context: CallbackContext) -> None:
         enriched_all, enriched_changed = await run_scrape_now(context, wait_for_lock_sec=0)
         reset_error_count(state)
         save_state(settings.state_file, state)
+    except ScrapeAlreadyRunningError:
+        logging.info("Scraping periódico omitido: ya hay otro scraping en curso.")
+        return
     except Exception as ex:
         logging.exception("Error en scraping periódico.")
         count = increment_error_count(state)

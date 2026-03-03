@@ -123,6 +123,26 @@ def test_run_scrape_now_fails_fast_when_scrape_in_progress():
     asyncio.run(_run_test())
 
 
+def test_run_scrape_now_wait_zero_runs_when_lock_is_free(monkeypatch):
+    settings = Settings(tg_chat_id="123", scrape_lock_wait_sec=0)
+    app = _FakeApp(settings)
+    context = _FakeContext(app, [])
+
+    expected = (["ok"], ["changed"])
+
+    def _fake_run_scrape_cycle(_settings, _run_args):
+        return expected
+
+    monkeypatch.setattr("ues_bot.commands.run_scrape_cycle", _fake_run_scrape_cycle)
+
+    async def _run_test():
+        result = await run_scrape_now(context, wait_for_lock_sec=0)
+        assert result == expected
+        assert app.bot_data[SCRAPE_LOCK_KEY].locked() is False
+
+    asyncio.run(_run_test())
+
+
 def test_scrape_cooldown():
     import ues_bot.commands as commands
 

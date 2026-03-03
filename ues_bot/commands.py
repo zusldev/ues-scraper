@@ -48,6 +48,10 @@ _last_scrape_command_ts = 0.0
 CommandFn = Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, None]]
 
 
+class ScrapeAlreadyRunningError(RuntimeError):
+    """Raised when a scrape is already running and lock acquisition times out."""
+
+
 def _restricted(func: CommandFn) -> CommandFn:
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -100,13 +104,16 @@ async def run_scrape_now(
         lock = asyncio.Lock()
         context.application.bot_data[SCRAPE_LOCK_KEY] = lock
 
-    if wait_for_lock_sec == 0 and lock.locked():
-        raise RuntimeError("Ya hay un scraping en curso. Intenta de nuevo en unos segundos.")
-
-    try:
-        await asyncio.wait_for(lock.acquire(), timeout=wait_for_lock_sec)
-    except TimeoutError as ex:
-        raise RuntimeError("Ya hay un scraping en curso. Intenta de nuevo en unos segundos.") from ex
+    if wait_for_lock_sec <= 0:
+        # timeout=0 with wait_for can raise immediately even when the lock is free.
+        if lock.locked():
+            raise ScrapeAlreadyRunningError("Ya hay un scraping en curso. Intenta de nuevo en unos segundos.")
+        await lock.acquire()
+    else:
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=wait_for_lock_sec)
+        except TimeoutError as ex:
+            raise ScrapeAlreadyRunningError("Ya hay un scraping en curso. Intenta de nuevo en unos segundos.") from ex
 
     try:
         return await asyncio.to_thread(run_scrape_cycle, settings, run_args)
