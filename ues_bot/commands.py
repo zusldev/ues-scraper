@@ -325,6 +325,7 @@ async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     tracked = len(state.get("events", {}))
     last_run = _fmt_ts(state.get("last_run"), settings.tz_name)
     last_error = state.get("last_error") or "-"
+    last_error_kind = state.get("last_error_kind") or "-"
     text = (
         "🤖 <b>Estado del bot</b>\n"
         f"• Dormido hasta: <b>{esc(sleep_txt)}</b>\n"
@@ -332,7 +333,8 @@ async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"• Intervalo: <b>{settings.scrape_interval_min} min</b>\n"
         f"• Eventos trackeados: <b>{tracked}</b>\n"
         f"• Última ejecución: <b>{esc(last_run)}</b>\n"
-        f"• Último error: <b>{esc(short(str(last_error), 120))}</b>"
+        f"• Último error: <b>{esc(short(str(last_error), 120))}</b>\n"
+        f"• Tipo último error: <b>{esc(str(last_error_kind))}</b>"
     )
     await _reply(update, text, parse_mode="HTML", disable_web_page_preview=True)
     save_state(settings.state_file, state)
@@ -523,6 +525,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"• Scrapes totales: <b>{metrics.get('total_scrapes', 0)}</b>\n"
         f"• Exitosos: <b>{metrics.get('successful_scrapes', 0)}</b>\n"
         f"• Fallidos: <b>{metrics.get('failed_scrapes', 0)}</b>\n"
+        f"• Errores red transitorios: <b>{metrics.get('network_transient_errors', 0)}</b>\n"
+        f"• Errores funcionales: <b>{metrics.get('functional_errors', 0)}</b>\n"
         f"• Último scrape: <b>{metrics.get('last_scrape_seconds', 0)}s</b>\n"
         f"• Promedio: <b>{metrics.get('avg_scrape_seconds', 0)}s</b>\n"
         f"• Eventos último ciclo: <b>{metrics.get('last_event_count', 0)}</b>"

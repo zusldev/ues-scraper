@@ -1,9 +1,18 @@
 import asyncio
 import time
 
-from ues_bot.commands import LAST_SCRAPE_TS_KEY, SCRAPE_LOCK_KEY, cmd_dormir, cmd_help, cmd_intervalo, run_scrape_now
+from ues_bot.commands import (
+    LAST_SCRAPE_TS_KEY,
+    SCRAPE_LOCK_KEY,
+    cmd_dormir,
+    cmd_estado,
+    cmd_help,
+    cmd_intervalo,
+    cmd_stats,
+    run_scrape_now,
+)
 from ues_bot.config import Settings
-from ues_bot.state import load_state
+from ues_bot.state import load_state, save_state
 
 
 class _FakeMessage:
@@ -157,3 +166,54 @@ def test_scrape_cooldown():
     assert can_run is False
     assert wait > 0
 
+
+def test_estado_shows_error_kind(tmp_path):
+    settings = Settings(tg_chat_id="123", state_file=str(tmp_path / "state.json"), tz_name="UTC")
+    app = _FakeApp(settings)
+    update = _FakeUpdate(123)
+    context = _FakeContext(app, [])
+
+    state = load_state(settings.state_file)
+    state["last_error"] = "httpx.ConnectError: [Errno 11001] getaddrinfo failed"
+    state["last_error_kind"] = "network_transient"
+    save_state(settings.state_file, state)
+
+    asyncio.run(cmd_estado(update, context))
+
+    text = update.effective_message.replies[0][0]
+    assert "Tipo último error" in text
+    assert "network_transient" in text
+
+
+def test_estado_shows_error_kind_fallback(tmp_path):
+    settings = Settings(tg_chat_id="123", state_file=str(tmp_path / "state.json"), tz_name="UTC")
+    app = _FakeApp(settings)
+    update = _FakeUpdate(123)
+    context = _FakeContext(app, [])
+
+    asyncio.run(cmd_estado(update, context))
+
+    text = update.effective_message.replies[0][0]
+    assert "Tipo último error" in text
+    assert "<b>-</b>" in text
+
+
+def test_stats_shows_error_counters(tmp_path):
+    settings = Settings(tg_chat_id="123", state_file=str(tmp_path / "state.json"), tz_name="UTC")
+    app = _FakeApp(settings)
+    update = _FakeUpdate(123)
+    context = _FakeContext(app, [])
+
+    state = load_state(settings.state_file)
+    metrics = state["metrics"]
+    metrics["network_transient_errors"] = 2
+    metrics["functional_errors"] = 3
+    save_state(settings.state_file, state)
+
+    asyncio.run(cmd_stats(update, context))
+
+    text = update.effective_message.replies[0][0]
+    assert "Errores red transitorios" in text
+    assert "Errores funcionales" in text
+    assert ">2<" in text or "<b>2</b>" in text
+    assert ">3<" in text or "<b>3</b>" in text

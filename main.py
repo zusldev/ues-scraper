@@ -18,6 +18,7 @@ try:
 except Exception:  # pragma: no cover
     ZoneInfo = None  # type: ignore
 
+from telegram.error import NetworkError
 from telegram.ext import Application, CallbackContext
 
 from ues_bot.commands import (
@@ -32,7 +33,14 @@ from ues_bot.commands import (
 from ues_bot.config import from_env
 from ues_bot.logging_utils import setup_logging
 from ues_bot.reminders import get_pending_reminders
-from ues_bot.state import increment_error_count, is_sleeping, load_state, reset_error_count, save_state
+from ues_bot.state import (
+    increment_error_count,
+    increment_error_metrics,
+    is_sleeping,
+    load_state,
+    reset_error_count,
+    save_state,
+)
 from ues_bot.summary import (
     build_changes_batch_message,
     build_daily_digest,
@@ -53,15 +61,34 @@ def _get_notification_mode(settings, state) -> str:
     return getattr(settings, "notification_mode", "smart")
 
 
+def _is_transient_telegram_network_error(error: Exception | None) -> bool:
+    if error is None or not isinstance(error, NetworkError):
+        return False
+    text = str(error).lower()
+    return "getaddrinfo failed" in text or "httpx.connecterror" in text
+
+
 async def global_error_handler(update: object, context: CallbackContext) -> None:
     """Log unhandled exceptions and notify via Telegram (respects quiet hours / sleep)."""
-    logging.exception("Excepción no manejada en handler:", exc_info=context.error)
-
     settings = context.application.bot_data.get("settings")
     if settings is None:
         return
 
     state = load_state(settings.state_file)
+    error_text = str(context.error)[:200] if context.error else "Error desconocido"
+    is_transient_network = _is_transient_telegram_network_error(context.error)
+
+    state["last_error"] = error_text
+    state["last_error_kind"] = "network_transient" if is_transient_network else "functional"
+    increment_error_metrics(state, state["last_error_kind"])
+    save_state(settings.state_file, state)
+
+    if is_transient_network:
+        logging.warning("Error de red transitorio en Telegram: %s", error_text)
+        return
+
+    logging.exception("Excepción no manejada en handler:", exc_info=context.error)
+
     sleeping = is_sleeping(state)
     local_now = now_local(settings.tz_name)
     quiet_now = is_in_quiet_hours(local_now, settings.quiet_start, settings.quiet_end)
@@ -69,7 +96,6 @@ async def global_error_handler(update: object, context: CallbackContext) -> None
     if sleeping or quiet_now:
         return
 
-    error_text = str(context.error)[:200] if context.error else "Error desconocido"
     msg = f"❌ <b>Error inesperado</b>\n<code>{esc(error_text)}</code>"
     try:
         await tg_send(
@@ -80,7 +106,7 @@ async def global_error_handler(update: object, context: CallbackContext) -> None
             bot=context.bot,
         )
     except Exception:
-        logging.exception("No se pudo enviar alerta de error inesperado.")
+        logging.error("No se pudo enviar alerta de error inesperado: %s", error_text)
 
 
 async def periodic_scrape_job(context: CallbackContext) -> None:
@@ -116,6 +142,8 @@ async def periodic_scrape_job(context: CallbackContext) -> None:
         logging.exception("Error en scraping periódico.")
         count = increment_error_count(state)
         state["last_error"] = str(ex)
+        state["last_error_kind"] = "functional"
+        increment_error_metrics(state, "functional")
         save_state(settings.state_file, state)
         if count >= 3 and not sleeping and not quiet_now:
             error_msg = (

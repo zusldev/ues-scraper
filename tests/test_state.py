@@ -5,6 +5,7 @@ import pytest
 
 from ues_bot.state import (
     cancel_sleep,
+    increment_error_metrics,
     is_sleeping,
     load_state,
     record_scrape_metrics,
@@ -22,6 +23,9 @@ def test_load_state_creates_defaults(tmp_path):
     assert "events" in state
     assert state["sleep_until"] is None
     assert state["last_run"] is None
+    assert state["last_error_kind"] is None
+    assert state["metrics"]["network_transient_errors"] == 0
+    assert state["metrics"]["functional_errors"] == 0
 
 
 def test_save_and_load_roundtrip(tmp_path):
@@ -109,3 +113,16 @@ def test_update_digest_evening_hour(tmp_path):
     save_state(sf, state)
     loaded = load_state(sf)
     assert loaded["digest_evening_hour"] == "21:00"
+
+
+def test_increment_error_metrics_by_kind(tmp_path):
+    sf = str(tmp_path / "state.json")
+    state = load_state(sf)
+
+    increment_error_metrics(state, "network_transient")
+    increment_error_metrics(state, "functional")
+    increment_error_metrics(state, "other")
+
+    metrics = state["metrics"]
+    assert metrics["network_transient_errors"] == 1
+    assert metrics["functional_errors"] == 2

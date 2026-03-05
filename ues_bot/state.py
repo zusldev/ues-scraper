@@ -15,6 +15,7 @@ def _with_defaults(state: Dict[str, Any]) -> Dict[str, Any]:
     state.setdefault("quiet_end", None)
     state.setdefault("last_run", None)
     state.setdefault("last_error", None)
+    state.setdefault("last_error_kind", None)
     state.setdefault("consecutive_errors", 0)
     state.setdefault("sent_reminders", {})
     state.setdefault("notification_mode", None)  # None = use settings default
@@ -28,6 +29,8 @@ def _with_defaults(state: Dict[str, Any]) -> Dict[str, Any]:
             "avg_scrape_seconds": 0.0,
             "last_scrape_seconds": 0.0,
             "last_event_count": 0,
+            "network_transient_errors": 0,
+            "functional_errors": 0,
         },
     )
     return state
@@ -106,3 +109,11 @@ def record_scrape_metrics(state: Dict[str, Any], duration_sec: float, event_coun
         metrics["avg_scrape_seconds"] = round(((prev_avg * (ok_count - 1)) + float(duration_sec)) / ok_count, 2)
     else:
         metrics["failed_scrapes"] = int(metrics.get("failed_scrapes", 0)) + 1
+
+
+def increment_error_metrics(state: Dict[str, Any], error_kind: str) -> None:
+    metrics = state.setdefault("metrics", {})
+    if error_kind == "network_transient":
+        metrics["network_transient_errors"] = int(metrics.get("network_transient_errors", 0)) + 1
+        return
+    metrics["functional_errors"] = int(metrics.get("functional_errors", 0)) + 1
